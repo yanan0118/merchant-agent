@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Merchant Growth Copilot</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans+SC:wght@400;500;600&display=swap");
+
+    :root {
+      --bg: #f5f7fa;
+      --panel: #ffffff;
+      --ink: #0f1d2d;
+      --ink-soft: #4c5e73;
+      --line: #d8dde5;
+      --line-strong: #c7cfd9;
+      --accent: #123b77;
+      --accent-soft: #eef3fb;
+      --warning: #8d5a20;
+      --warning-soft: #fff4e7;
+      --radius-xl: 10px;
+      --radius-lg: 8px;
+      --radius-md: 6px;
+      --shadow-main: 0 8px 24px rgba(15, 29, 45, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      min-height: 100vh;
+      padding: 36px 24px 64px;
+    }
+
+    .page {
+      max-width: 1160px;
+      margin: 0 auto;
+      display: grid;
+      gap: 24px;
+    }
+
+    .hero,
+    .input-card,
+    .result-card,
+    .intercept-card {
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+
+    .hero {
+      border-radius: var(--radius-xl);
+      padding: 30px 34px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      position: relative;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--accent);
+      border-top-left-radius: var(--radius-xl);
+      border-top-right-radius: var(--radius-xl);
+    }
+
+    .kicker {
+      margin: 0 0 10px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #5f7387;
+      font-weight: 600;
+    }
+
+    .hero h1 {
+      margin: 0 0 10px;
+      font-family: "Source Serif 4", "Songti SC", serif;
+      font-size: 42px;
+      letter-spacing: -0.01em;
+      line-height: 1.08;
+      font-weight: 600;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 16px;
+      line-height: 1.62;
+      max-width: 620px;
+    }
+
+    .badge {
+      align-self: center;
+      border: 1px solid #b8c4d4;
+      color: #29425d;
+      background: #f4f7fb;
+      border-radius: 4px;
+      padding: 7px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .input-card {
+      border-radius: var(--radius-xl);
+      padding: 20px 22px;
+      box-shadow: var(--shadow-main);
+    }
+
+    .input-inner {
+      background: #fff;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      padding: 14px 14px 12px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .brand-row {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .brand-label {
+      font-size: 12px;
+      color: #5b6f85;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+    }
+
+    .brand-input {
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      font: inherit;
+      font-size: 14px;
+      color: var(--ink);
+      padding: 8px 10px;
+      outline: none;
+      background: #fbfdff;
+    }
+
+    .brand-input:focus {
+      border-color: #8ea6c2;
+      background: #fff;
+    }
+
+    .mode-row {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .mode-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .mode-btn {
+      border: 1px solid var(--line);
+      background: #f9fbfd;
+      color: #1c3550;
+      border-radius: 4px;
+      font: inherit;
+      font-size: 12px;
+      padding: 7px 11px;
+      cursor: pointer;
+      transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+    }
+
+    .mode-btn.active {
+      border-color: #274873;
+      background: #163a65;
+      color: #fff;
+    }
+
+    .mode-tip {
+      margin-top: 2px;
+      font-size: 12px;
+      color: #5d6f82;
+      line-height: 1.5;
+    }
+
+    textarea {
+      width: 100%;
+      border: 0;
+      resize: vertical;
+      min-height: 86px;
+      max-height: 220px;
+      font: inherit;
+      color: var(--ink);
+      background: transparent;
+      outline: none;
+      line-height: 1.6;
+      font-size: 16px;
+    }
+
+    textarea::placeholder {
+      color: #7b8c9d;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #5d6f82;
+      letter-spacing: 0.02em;
+    }
+
+    .run-btn {
+      border: 1px solid #1f3f66;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      padding: 11px 18px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: 600;
+      box-shadow: none;
+      transition: background 0.18s ease;
+    }
+
+    .run-btn:hover {
+      background: #0f2f58;
+    }
+
+    .chips {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      background: #f9fbfd;
+      color: #1c3550;
+      border-radius: 4px;
+      font: inherit;
+      font-size: 12px;
+      padding: 7px 12px;
+      cursor: pointer;
+      transition: border-color 0.18s ease, background 0.18s ease;
+    }
+
+    .chip:hover {
+      border-color: #9eb2c9;
+      background: var(--accent-soft);
+    }
+
+    .result-card,
+    .intercept-card {
+      border-radius: var(--radius-xl);
+      padding: 24px 26px;
+      box-shadow: var(--shadow-main);
+    }
+
+    .result-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 4px;
+      background: var(--accent);
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-family: "IBM Plex Sans SC", sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+    }
+
+    .result-title {
+      margin: 0;
+      font-size: 19px;
+      line-height: 1.2;
+      font-family: "Source Serif 4", "Songti SC", serif;
+      font-weight: 600;
+    }
+
+    .result-sub {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: #617489;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .section {
+      padding: 14px 0;
+      border-top: 1px solid #e2e7ee;
+    }
+
+    .section:first-of-type {
+      border-top: 0;
+      padding-top: 2px;
+    }
+
+    .section h3 {
+      margin: 0 0 9px;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #52687f;
+      font-weight: 600;
+    }
+
+    .section p {
+      margin: 0;
+      line-height: 1.72;
+      color: #183443;
+      font-size: 15px;
+    }
+
+    .bullets {
+      margin: 0;
+      padding-left: 18px;
+      display: grid;
+      gap: 8px;
+      color: #183443;
+      line-height: 1.65;
+      font-size: 15px;
+    }
+
+    .intercept-card {
+      border-color: #e5d3bc;
+      background: #fffbf6;
+    }
+
+    .intercept-title {
+      margin: 0 0 6px;
+      color: #7c4a16;
+      font-family: "Source Serif 4", "Songti SC", serif;
+      font-size: 30px;
+      font-weight: 600;
+    }
+
+    .intercept-text {
+      margin: 0;
+      color: #5b3a1f;
+      line-height: 1.66;
+      font-size: 15px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 900px) {
+      .hero {
+        flex-direction: column;
+      }
+
+      .hero h1 {
+        font-size: 34px;
+      }
+    }
+
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="kicker">Merchant Performance Intelligence</p>
+        <h1>Merchant Growth Copilot</h1>
+        <p>输入经营相关问题，系统会在受控框架下给出诊断结论与可执行建议。</p>
+      </div>
+      <div class="badge">Controlled Analysis</div>
+    </section>
+
+    <section class="input-card">
+      <div class="input-inner">
+        <textarea id="questionInput" placeholder="例如：为什么最近订单下降了？我该先做哪些动作？"></textarea>
+        <div class="brand-row">
+          <label for="brandIdInput" class="brand-label">Brand ID</label>
+          <input id="brandIdInput" class="brand-input" type="text" value="B001" placeholder="例如 B001" />
+        </div>
+        <div class="mode-row">
+          <div class="brand-label">Mode</div>
+          <div>
+            <div class="mode-group">
+              <button id="mockModeBtn" class="mode-btn active" type="button">Mock Demo</button>
+              <button id="realModeBtn" class="mode-btn" type="button">Real LLM</button>
+            </div>
+            <div id="modeTip" class="mode-tip">当前为 Mock Demo：前端本地演示，不调用后端 LLM。</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="hint">Brand-scoped analysis with controlled recommendation framework</div>
+          <button class="run-btn" id="runBtn" type="button">开始分析</button>
+        </div>
+      </div>
+      <div class="chips">
+        <button class="chip" data-question="为什么最近订单下降了？">为什么最近订单下降了？</button>
+        <button class="chip" data-question="给我一些提升订单的建议">给我一些提升订单的建议</button>
+        <button class="chip" data-question="帮我全面诊断一下这个商家">帮我全面诊断一下这个商家</button>
+        <button class="chip" data-question="这家店履约上有什么风险？">这家店履约上有什么风险？</button>
+      </div>
+    </section>
+
+    <section id="resultCard" class="result-card hidden">
+      <header class="result-head">
+        <div class="avatar">MG</div>
+        <div>
+          <h2 class="result-title">Analysis Result</h2>
+          <p id="resultSub" class="result-sub">Generated under merchant growth framework</p>
+        </div>
+      </header>
+
+      <div class="section">
+        <h3>Executive Summary</h3>
+        <p id="summaryText"></p>
+      </div>
+      <div class="section">
+        <h3>Key Problems</h3>
+        <ul id="problemsList" class="bullets"></ul>
+      </div>
+      <div class="section">
+        <h3>Recommended Actions</h3>
+        <ul id="actionsList" class="bullets"></ul>
+      </div>
+      <div class="section">
+        <h3>Suggested Talking Points</h3>
+        <ul id="talkingList" class="bullets"></ul>
+      </div>
+    </section>
+
+    <section id="interceptCard" class="intercept-card hidden">
+      <h2 class="intercept-title">这是无关问题</h2>
+      <p class="intercept-text">
+        请继续提问商家经营诊断、订单波动原因、增长建议、转化/履约/供给等相关问题。
+      </p>
+      <div class="chips" style="margin-top: 14px;">
+        <button class="chip" data-question="帮我诊断这家店最近经营情况">帮我诊断这家店最近经营情况</button>
+        <button class="chip" data-question="为什么订单最近下滑">为什么订单最近下滑</button>
+        <button class="chip" data-question="给我三条优先级最高的提升建议">给我三条优先级最高的提升建议</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const BUSINESS_KEYWORDS = [
+      "商家", "门店", "店铺", "经营", "业务", "订单", "流量", "曝光", "转化", "销量",
+      "gmv", "营业", "客单价", "履约", "出餐", "取消率", "sku", "商品", "菜单",
+      "折扣", "活动", "诊断", "原因", "下降", "提升", "建议", "merchant", "orders", "conversion"
+    ];
+
+    const IRRELEVANT_KEYWORDS = [
+      "天气", "新闻", "股票", "电影", "动漫", "游戏", "旅游", "翻译", "笑话", "星座",
+      "菜谱", "健身", "减肥", "情感", "nba", "足球", "机票", "酒店", "music", "movie"
+    ];
+
+    const input = document.getElementById("questionInput");
+    const brandInput = document.getElementById("brandIdInput");
+    const runBtn = document.getElementById("runBtn");
+    const mockModeBtn = document.getElementById("mockModeBtn");
+    const realModeBtn = document.getElementById("realModeBtn");
+    const modeTip = document.getElementById("modeTip");
+    const resultCard = document.getElementById("resultCard");
+    const interceptCard = document.getElementById("interceptCard");
+    const resultSub = document.getElementById("resultSub");
+    const summaryText = document.getElementById("summaryText");
+    const problemsList = document.getElementById("problemsList");
+    const actionsList = document.getElementById("actionsList");
+    const talkingList = document.getElementById("talkingList");
+    const interceptTitle = document.querySelector(".intercept-title");
+    const interceptText = document.querySelector(".intercept-text");
+
+    const BRAND_NAMES = {
+      B001: "Blue Bottle",
+      B002: "Sunrise Burger"
+    };
+    const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:8765" : "";
+    let currentMode = "mock";
+
+    function containsAny(text, words) {
+      return words.some((w) => text.includes(w));
+    }
+
+    function detectIntent(question) {
+      const q = question.trim();
+      const lower = q.toLowerCase();
+      const hasBusiness = containsAny(q, BUSINESS_KEYWORDS) || containsAny(lower, BUSINESS_KEYWORDS);
+      const hasIrrelevant = containsAny(q, IRRELEVANT_KEYWORDS) || containsAny(lower, IRRELEVANT_KEYWORDS);
+
+      if (hasIrrelevant && !hasBusiness) {
+        return { intent: "irrelevant", modules: [], reason: "Detected non-business topic." };
+      }
+      if (q.includes("为什么") || q.includes("原因") || q.includes("下降")) {
+        return { intent: "root_cause", modules: ["health", "gap"], reason: "Focuses on diagnosing decline causes." };
+      }
+      if (q.includes("建议") || q.includes("怎么做") || q.includes("提升")) {
+        return { intent: "action_recommendation", modules: ["gap", "action"], reason: "Asks for growth actions." };
+      }
+      if (!hasBusiness) {
+        return { intent: "irrelevant", modules: [], reason: "No clear merchant-growth context." };
+      }
+      return { intent: "diagnosis", modules: ["health", "gap", "action"], reason: "General business diagnosis request." };
+    }
+
+    function makeAnswer(intent, brandId, brandName) {
+      if (intent === "root_cause") {
+        return {
+          summary: `品牌 ${brandName}（${brandId}）当前处于风险状态，近7日订单表现弱于历史与同类，问题更可能是多因素叠加而非单点异常。`,
+          problems: [
+            "转化率偏低，流量进入后成交效率不足。",
+            "图片覆盖率和营业时长偏弱，可能影响用户决策与高峰承接。",
+            "出餐时长和商责取消率存在压力，履约体验可能拖累复购。"
+          ],
+          actions: [
+            "先聚焦高影响动作：优化商品图片或设置更有吸引力的折扣。",
+            "补齐热销商品图片并校准菜单供给，提升转化入口质量。",
+            "梳理履约流程，优先压缩出餐时长并降低商责取消率。"
+          ],
+          talking: [
+            "先同步问题不是单一流量波动，而是转化与履约共同影响。",
+            "建议按优先级做两周小步快跑验证，再放大有效动作。"
+          ]
+        };
+      }
+
+      if (intent === "action_recommendation") {
+        return {
+          summary: `品牌 ${brandName}（${brandId}）当前问题重心在可执行提升动作，建议优先从转化入口与履约稳定性切入，快速拉动订单。`,
+          problems: [
+            "转化率处于弱势区间，核心入口效率需要提升。",
+            "菜单展示质量与营业覆盖不足，影响高峰承接能力。"
+          ],
+          actions: [
+            "优化商品图片或设置更有吸引力的折扣。",
+            "补齐菜单图片，优先补热销商品图。",
+            "延长晚间营业时间，覆盖高峰时段。"
+          ],
+          talking: [
+            "本轮动作先求确定性，不做过多并行尝试。",
+            "每条动作绑定一个结果指标，方便复盘。"
+          ]
+        };
+      }
+
+      return {
+        summary: `品牌 ${brandName}（${brandId}）建议做一轮全链路诊断，当前表现显示风险信号，需同时关注健康度、关键缺口与动作优先级。`,
+        problems: [
+          "健康度处于风险区间，订单趋势存在下滑压力。",
+          "关键缺口集中在转化、供给展示与履约体验。",
+          "动作执行顺序需要按影响力和可落地性重新排列。"
+        ],
+        actions: [
+          "先处理转化入口：图片与折扣策略并行优化。",
+          "再处理履约稳定性：缩短出餐并降低取消率。",
+          "最后补齐供给结构：增加动销SKU和高频商品可得性。"
+        ],
+        talking: [
+          "先讲清现状，再对齐优先级，最后明确执行节奏。",
+          "所有建议都基于受控分析框架，避免自由发挥。"
+        ]
+      };
+    }
+
+    function renderList(target, items) {
+      target.innerHTML = "";
+      items.forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        target.appendChild(li);
+      });
+    }
+
+    function runAnalysis() {
+      if (currentMode === "real") {
+        runRealAnalysis();
+        return;
+      }
+
+      const question = input.value.trim();
+      const brandId = brandInput.value.trim().toUpperCase();
+      if (!question) {
+        input.focus();
+        return;
+      }
+      if (!brandId) {
+        brandInput.focus();
+        return;
+      }
+
+      const brandName = BRAND_NAMES[brandId];
+      if (!brandName) {
+        resultCard.classList.add("hidden");
+        interceptCard.classList.remove("hidden");
+        interceptTitle.textContent = "未找到该品牌";
+        interceptText.textContent = `未识别到品牌 ${brandId}。请先输入有效的 brand id（如 B001、B002），再发起分析。`;
+        return;
+      }
+
+      const plan = detectIntent(question);
+      if (plan.intent === "irrelevant") {
+        resultCard.classList.add("hidden");
+        interceptCard.classList.remove("hidden");
+        interceptTitle.textContent = "这是无关问题";
+        interceptText.textContent = "请继续提问商家经营诊断、订单波动原因、增长建议、转化/履约/供给等相关问题。";
+        return;
+      }
+
+      const answer = makeAnswer(plan.intent, brandId, brandName);
+      resultSub.textContent = `Generated for ${brandName} (${brandId}) under controlled framework`;
+      summaryText.textContent = answer.summary;
+      renderList(problemsList, answer.problems);
+      renderList(actionsList, answer.actions);
+      renderList(talkingList, answer.talking);
+
+      interceptCard.classList.add("hidden");
+      resultCard.classList.remove("hidden");
+    }
+
+    async function runRealAnalysis() {
+      const question = input.value.trim();
+      const brandId = brandInput.value.trim().toUpperCase();
+
+      if (!question) {
+        input.focus();
+        return;
+      }
+      if (!brandId) {
+        brandInput.focus();
+        return;
+      }
+
+      runBtn.disabled = true;
+      runBtn.textContent = "分析中...";
+
+      try {
+        const response = await fetch(`${API_BASE}/api/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            brand_id: brandId,
+            question,
+            mock_mode: false
+          })
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error || `Request failed: ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (result.intercepted) {
+          resultCard.classList.add("hidden");
+          interceptCard.classList.remove("hidden");
+          interceptTitle.textContent = "这是无关问题";
+          interceptText.textContent = result.analysis_result.text;
+          return;
+        }
+
+        const brandName = result.brand_name || brandId;
+        const planIntent = result.intent_result && result.intent_result.intent ? result.intent_result.intent : "diagnosis";
+        const answer = makeAnswer(planIntent, brandId, brandName);
+        summaryText.textContent = answer.summary;
+        renderList(problemsList, answer.problems);
+        renderList(actionsList, answer.actions);
+
+        const talking = [
+          `本轮分析范围：${brandName}（${brandId}）。`,
+          `模型模式：${result.analysis_result.mode || "real"}。`,
+          result.analysis_result.text
+        ];
+        renderList(talkingList, talking);
+
+        resultSub.textContent = `Generated for ${brandName} (${brandId}) by real LLM pipeline`;
+        interceptCard.classList.add("hidden");
+        resultCard.classList.remove("hidden");
+      } catch (error) {
+        resultCard.classList.add("hidden");
+        interceptCard.classList.remove("hidden");
+        interceptTitle.textContent = "Real LLM 调用失败";
+        interceptText.textContent = `请确认本地服务已启动（python copilot_server.py），并检查 API Key。错误信息：${error.message}`;
+      } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = "开始分析";
+      }
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      const isMock = mode === "mock";
+      mockModeBtn.classList.toggle("active", isMock);
+      realModeBtn.classList.toggle("active", !isMock);
+      modeTip.textContent = isMock
+        ? "当前为 Mock Demo：前端本地演示，不调用后端 LLM。"
+        : "当前为 Real LLM：调用本地 /api/analyze 接口，走真实模型。";
+    }
+
+    runBtn.addEventListener("click", runAnalysis);
+    mockModeBtn.addEventListener("click", () => setMode("mock"));
+    realModeBtn.addEventListener("click", () => setMode("real"));
+    input.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        runAnalysis();
+      }
+    });
+
+    document.querySelectorAll(".chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const question = chip.getAttribute("data-question");
+        if (question) {
+          input.value = question;
+          runAnalysis();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

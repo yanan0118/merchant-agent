@@ -109,6 +109,12 @@ class AnalysisPlan:
 
 
 PLAN_LIBRARY = {
+    "irrelevant": AnalysisPlan(
+        intent="irrelevant",
+        focus_metrics=[],
+        analysis_modules=[],
+        time_range="",
+    ),
     "root_cause": AnalysisPlan(
         intent="root_cause",
         focus_metrics=[
@@ -148,12 +154,31 @@ PLAN_LIBRARY = {
     ),
 }
 
+BUSINESS_RELATED_KEYWORDS = {
+    "商家", "门店", "店铺", "经营", "业务", "订单", "流量", "曝光", "转化", "销量",
+    "gmv", "营业", "客单价", "履约", "出餐", "取消率", "sku", "商品", "菜单",
+    "折扣", "活动", "诊断", "原因", "下降", "提升", "建议", "merchant",
+    "conversion", "orders", "traffic", "cancel", "discount", "store",
+}
+
+IRRELEVANT_KEYWORDS = {
+    "天气", "新闻", "股票", "八卦", "电影", "电视剧", "动漫", "游戏", "旅游", "翻译",
+    "写代码", "python 教程", "算法题", "笑话", "星座", "菜谱", "健身", "减肥", "情感",
+    "nba", "足球", "彩票", "出行", "机票", "酒店", "music", "movie", "recipe",
+}
+
+IRRELEVANT_RESPONSE_TEXT = (
+    "这是无关问题。请继续提问商家经营诊断、订单波动原因、增长建议、转化/履约/供给等相关问题。"
+)
+
 
 def create_mock_inputs(seed: int = 42) -> Tuple[pd.DataFrame, Dict[str, np.ndarray]]:
     merchant_df = pd.DataFrame(
         [
             {
                 "merchant_id": "M001",
+                "brand_id": "B001",
+                "brand_name": "Blue Bottle",
                 "merchant_name": "Blue Bottle Demo Store",
                 "category": "coffee",
                 "district": "Pudong",
@@ -172,7 +197,30 @@ def create_mock_inputs(seed: int = 42) -> Tuple[pd.DataFrame, Dict[str, np.ndarr
                 "discount_rate": 0.06,
             },
             {
+                "merchant_id": "M003",
+                "brand_id": "B001",
+                "brand_name": "Blue Bottle",
+                "merchant_name": "Blue Bottle Downtown",
+                "category": "coffee",
+                "district": "Jingan",
+                "orders_7d": 156,
+                "orders_prev_7d": 168,
+                "orders_last_30d_pctl": 0.86,
+                "orders_peer_pctl": 0.67,
+                "impressions": 6300,
+                "conversion_rate": 0.026,
+                "image_coverage": 0.62,
+                "open_hours": 9.5,
+                "accept_time_mins": 2.8,
+                "prep_time_mins": 15.2,
+                "merchant_cancel_rate": 0.041,
+                "active_spu_count": 30,
+                "discount_rate": 0.08,
+            },
+            {
                 "merchant_id": "M002",
+                "brand_id": "B002",
+                "brand_name": "Sunrise Burger",
                 "merchant_name": "Sunrise Burger Demo Store",
                 "category": "burger",
                 "district": "Xuhui",
@@ -189,6 +237,27 @@ def create_mock_inputs(seed: int = 42) -> Tuple[pd.DataFrame, Dict[str, np.ndarr
                 "merchant_cancel_rate": 0.021,
                 "active_spu_count": 41,
                 "discount_rate": 0.11,
+            },
+            {
+                "merchant_id": "M004",
+                "brand_id": "B002",
+                "brand_name": "Sunrise Burger",
+                "merchant_name": "Sunrise Burger Center",
+                "category": "burger",
+                "district": "Pudong",
+                "orders_7d": 248,
+                "orders_prev_7d": 255,
+                "orders_last_30d_pctl": 0.62,
+                "orders_peer_pctl": 0.49,
+                "impressions": 9800,
+                "conversion_rate": 0.031,
+                "image_coverage": 0.76,
+                "open_hours": 11.3,
+                "accept_time_mins": 2.3,
+                "prep_time_mins": 13.4,
+                "merchant_cancel_rate": 0.028,
+                "active_spu_count": 38,
+                "discount_rate": 0.1,
             },
         ]
     )
@@ -209,6 +278,24 @@ def create_mock_inputs(seed: int = 42) -> Tuple[pd.DataFrame, Dict[str, np.ndarr
 
 def get_merchant_row(merchant_df: pd.DataFrame, merchant_id: str) -> pd.Series:
     return merchant_df.loc[merchant_df["merchant_id"] == merchant_id].iloc[0]
+
+
+def get_brand_row(merchant_df: pd.DataFrame, brand_id: str) -> pd.Series:
+    brand_df = merchant_df.loc[merchant_df["brand_id"] == brand_id]
+    if brand_df.empty:
+        raise ValueError(f"brand_id not found: {brand_id}")
+
+    brand_name = str(brand_df.iloc[0]["brand_name"])
+    aggregated = brand_df.iloc[0].copy()
+    numeric_cols = brand_df.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        aggregated[col] = float(brand_df[col].mean())
+
+    aggregated["merchant_id"] = f"BRAND:{brand_id}"
+    aggregated["merchant_name"] = f"{brand_name} (Brand Aggregate)"
+    aggregated["brand_id"] = brand_id
+    aggregated["brand_name"] = brand_name
+    return aggregated
 
 
 def percentile_rank(value: float, population: np.ndarray, higher_is_better: bool = True) -> float:
@@ -377,10 +464,19 @@ def render_report(output: Dict[str, Any]) -> None:
 
 
 def plan_analysis(question: str) -> AnalysisPlan:
+    lower_q = question.lower()
+
+    if any(keyword in question for keyword in IRRELEVANT_KEYWORDS) and not any(
+        keyword in question or keyword in lower_q for keyword in BUSINESS_RELATED_KEYWORDS
+    ):
+        return PLAN_LIBRARY["irrelevant"]
+
     if ("为什么" in question) or ("原因" in question) or ("下降" in question):
         return PLAN_LIBRARY["root_cause"]
     if ("建议" in question) or ("怎么做" in question) or ("提升" in question):
         return PLAN_LIBRARY["action_recommendation"]
+    if not any(keyword in question or keyword in lower_q for keyword in BUSINESS_RELATED_KEYWORDS):
+        return PLAN_LIBRARY["irrelevant"]
     return PLAN_LIBRARY["diagnosis"]
 
 
@@ -398,6 +494,8 @@ def run_pipeline(
         "plan": asdict(plan),
         "merchant_id": merchant_row["merchant_id"],
         "merchant_name": merchant_row["merchant_name"],
+        "brand_id": merchant_row.get("brand_id", ""),
+        "brand_name": merchant_row.get("brand_name", ""),
     }
 
     gap_results: Optional[List[GapResult]] = None
@@ -419,8 +517,23 @@ def run_pipeline(
     return result
 
 
-def load_local_env(env_path: str = ".env") -> bool:
-    env_file = Path(env_path)
+def resolve_env_path(env_path: Optional[str] = None) -> Path:
+    if env_path:
+        return Path(env_path).expanduser()
+
+    configured_path = os.getenv("MERCHANT_AGENT_ENV_PATH")
+    if configured_path:
+        return Path(configured_path).expanduser()
+
+    default_external_path = Path.home() / ".merchant-agent" / ".env"
+    if default_external_path.exists():
+        return default_external_path
+
+    return Path(".env")
+
+
+def load_local_env(env_path: Optional[str] = None) -> bool:
+    env_file = resolve_env_path(env_path)
     if not env_file.exists():
         return False
 
@@ -441,6 +554,19 @@ def estimate_text_tokens(text: str, model: str = "gpt-4.1") -> int:
     except KeyError:
         encoding = tiktoken.get_encoding("cl100k_base")
     return len(encoding.encode(text))
+
+
+def create_openai_client() -> Any:
+    from openai import OpenAI
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY 没设置，请先配置可读取到 key 的 .env")
+
+    base_url = os.getenv("OPENAI_BASE_URL")
+    if base_url:
+        return OpenAI(api_key=api_key, base_url=base_url)
+    return OpenAI(api_key=api_key)
 
 
 def normalize_plan_from_intent(intent: str) -> AnalysisPlan:
@@ -479,7 +605,8 @@ def build_intent_router_prompt(question: str) -> str:
     return f"""
 你是商家经营分析系统的意图识别模块。
 
-请只从以下三个 intent 中选择一个：
+请只从以下四个 intent 中选择一个：
+- irrelevant
 - diagnosis
 - root_cause
 - action_recommendation
@@ -501,13 +628,7 @@ def identify_intent(question: str, model: str = "gpt-4.1-mini", mock_mode: bool 
             "mode": "mock",
         }
 
-    from openai import OpenAI
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY 没设置，请先在工作区根目录创建 .env")
-
-    client = OpenAI(api_key=api_key)
+    client = create_openai_client()
     response = client.responses.create(
         model=model,
         input=[
@@ -646,13 +767,7 @@ def generate_controlled_analysis(
             "mode": "mock",
         }
 
-    from openai import OpenAI
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY 没设置，请先在工作区根目录创建 .env")
-
-    client = OpenAI(api_key=api_key)
+    client = create_openai_client()
     response = client.responses.create(
         model=model,
         input=[
@@ -673,8 +788,9 @@ def generate_controlled_analysis(
 
 
 def run_llm_orchestrated_pipeline(
-    merchant_row: pd.Series,
+    brand_id: str,
     question: str,
+    merchant_df: pd.DataFrame,
     peer_benchmark: Dict[str, np.ndarray],
     health_config: Dict[str, float] = HEALTH_CONFIG,
     gap_config: Dict[str, float] = GAP_CONFIG,
@@ -683,9 +799,33 @@ def run_llm_orchestrated_pipeline(
     mock_mode: bool = True,
 ) -> Dict[str, Any]:
     load_local_env()
+    brand_row = get_brand_row(merchant_df, brand_id)
     intent_result = identify_intent(question=question, model=intent_model, mock_mode=mock_mode)
+
+    if intent_result["intent"] == "irrelevant":
+        return {
+            "brand_id": brand_id,
+            "brand_name": str(brand_row["brand_name"]),
+            "question": question,
+            "intent_result": {
+                "intent": intent_result["intent"],
+                "reason": intent_result["reason"],
+                "mode": intent_result["mode"],
+            },
+            "intercepted": True,
+            "structured_output": None,
+            "analysis_result": {
+                "text": IRRELEVANT_RESPONSE_TEXT,
+                "estimated_input_tokens": None,
+                "actual_input_tokens": None,
+                "actual_output_tokens": None,
+                "actual_total_tokens": None,
+                "mode": "intercepted",
+            },
+        }
+
     structured_output = run_pipeline(
-        merchant_row=merchant_row,
+        merchant_row=brand_row,
         question=question,
         peer_benchmark=peer_benchmark,
         health_config=health_config,
@@ -698,6 +838,8 @@ def run_llm_orchestrated_pipeline(
         mock_mode=mock_mode,
     )
     return {
+        "brand_id": brand_id,
+        "brand_name": str(brand_row["brand_name"]),
         "question": question,
         "intent_result": {
             "intent": intent_result["intent"],
