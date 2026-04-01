@@ -463,21 +463,68 @@ def render_report(output: Dict[str, Any]) -> None:
             )
 
 
-def plan_analysis(question: str) -> AnalysisPlan:
+def fallback_rule_planner(question: str) -> Dict[str, Any]:
+    """Rule-based planner used as the stable fallback path."""
     lower_q = question.lower()
 
     if any(keyword in question for keyword in IRRELEVANT_KEYWORDS) and not any(
         keyword in question or keyword in lower_q for keyword in BUSINESS_RELATED_KEYWORDS
     ):
-        return PLAN_LIBRARY["irrelevant"]
+        plan = PLAN_LIBRARY["irrelevant"]
+        return {
+            "intent": plan.intent,
+            "modules": plan.analysis_modules,
+            "focus_metrics": plan.focus_metrics,
+            "reason": "规则识别为无关问题",
+            "plan": plan,
+            "mode": "fallback_rule",
+        }
 
     if ("为什么" in question) or ("原因" in question) or ("下降" in question):
-        return PLAN_LIBRARY["root_cause"]
+        plan = PLAN_LIBRARY["root_cause"]
+        return {
+            "intent": plan.intent,
+            "modules": plan.analysis_modules,
+            "focus_metrics": plan.focus_metrics,
+            "reason": "规则识别为原因分析问题",
+            "plan": plan,
+            "mode": "fallback_rule",
+        }
     if ("建议" in question) or ("怎么做" in question) or ("提升" in question):
-        return PLAN_LIBRARY["action_recommendation"]
+        plan = PLAN_LIBRARY["action_recommendation"]
+        return {
+            "intent": plan.intent,
+            "modules": plan.analysis_modules,
+            "focus_metrics": plan.focus_metrics,
+            "reason": "规则识别为动作建议问题",
+            "plan": plan,
+            "mode": "fallback_rule",
+        }
     if not any(keyword in question or keyword in lower_q for keyword in BUSINESS_RELATED_KEYWORDS):
-        return PLAN_LIBRARY["irrelevant"]
-    return PLAN_LIBRARY["diagnosis"]
+        plan = PLAN_LIBRARY["irrelevant"]
+        return {
+            "intent": plan.intent,
+            "modules": plan.analysis_modules,
+            "focus_metrics": plan.focus_metrics,
+            "reason": "规则识别为无关问题",
+            "plan": plan,
+            "mode": "fallback_rule",
+        }
+
+    plan = PLAN_LIBRARY["diagnosis"]
+    return {
+        "intent": plan.intent,
+        "modules": plan.analysis_modules,
+        "focus_metrics": plan.focus_metrics,
+        "reason": "规则识别为整体经营诊断问题",
+        "plan": plan,
+        "mode": "fallback_rule",
+    }
+
+
+def plan_analysis(question: str) -> AnalysisPlan:
+    """Backward-compatible wrapper for previous callers."""
+    return fallback_rule_planner(question)["plan"]
 
 
 def run_pipeline(
@@ -567,6 +614,255 @@ def create_openai_client() -> Any:
     if base_url:
         return OpenAI(api_key=api_key, base_url=base_url)
     return OpenAI(api_key=api_key)
+
+
+def validate_plan_schema(payload: Dict[str, Any]) -> Dict[str, Any]:
+    allowed_intents = {"diagnosis", "root_cause", "action_recommendation", "irrelevant"}
+    allowed_modules = {"health", "gap", "action"}
+
+    intent = payload.get("intent")
+    if intent not in allowed_intents:
+        raise ValueError(f"invalid intent: {intent}")
+
+    modules = payload.get("modules")
+    if not isinstance(modules, list):
+        raise ValueError("modules must be a list")
+    if any((not isinstance(m, str)) or (m not in allowed_modules) for m in modules):
+        raise ValueError(f"invalid modules: {modules}")
+
+    if intent == "irrelevant" and modules:
+        raise ValueError("irrelevant intent must have empty modules")
+    if intent != "irrelevant" and not modules:
+        raise ValueError("non-irrelevant intent must have modules")
+
+    focus_metrics = payload.get("focus_metrics")
+    if not isinstance(focus_metrics, list):
+        raise ValueError("focus_metrics must be a list")
+    if any(not isinstance(x, str) for x in focus_metrics):
+        raise ValueError("focus_metrics must be list[str]")
+
+    reason = payload.get("reason", "")
+    if not isinstance(reason, str):
+        raise ValueError("reason must be str")
+
+    return {
+        "intent": intent,
+        "modules": modules,
+        "focus_metrics": focus_metrics,
+        "reason": reason.strip(),
+    }
+
+
+def build_planner_prompt(question: str) -> str:
+    return f"""
+你是商家增长助手的 analysis planner。
+请先判断用户问题是否与商家经营分析相关，然后输出分析计划。
+
+只允许以下 intent：
+- diagnosis
+- root_cause
+- action_recommendation
+- irrelevant
+
+只允许以下 modules（按需选择）：
+- health
+- gap
+- action
+
+输出必须是 JSON，且仅输出 JSON，不要额外解释。格式如下：
+{{
+  "intent": "diagnosis|root_cause|action_recommendation|irrelevant",
+  "modules": ["health", "gap", "action"],
+  "focus_metrics": ["..."],
+  "reason": "简短中文理由"
+}}
+
+约束：
+- 如果 intent 是 irrelevant，modules 必须为空数组，focus_metrics 也应为空或很少。
+- 不要编造数据库字段，focus_metrics 尽量使用常见经营指标词汇。
+
+用户问题：{question}
+""".strip()
+
+
+def parse_planner_payload(raw_text: str) -> Dict[str, Any]:
+    json_text = extract_json_object(raw_text)
+    payload = json.loads(json_text)
+    return validate_plan_schema(payload)
+
+
+def plan_analysis_with_llm(question: str, model: str = "gpt-4.1-mini") -> Dict[str, Any]:
+    client = create_openai_client()
+    response = client.responses.create(
+        model=model,
+        input=[
+            {"role": "system", "content": "你是商家增长诊断系统的规划器，只返回合法 JSON。"},
+            {"role": "user", "content": build_planner_prompt(question)},
+        ],
+    )
+    parsed = parse_planner_payload(response.output_text)
+    plan = AnalysisPlan(
+        intent=parsed["intent"],
+        focus_metrics=parsed["focus_metrics"],
+        analysis_modules=parsed["modules"],
+        time_range="7d",
+    )
+    return {
+        "intent": parsed["intent"],
+        "modules": parsed["modules"],
+        "focus_metrics": parsed["focus_metrics"],
+        "reason": parsed["reason"],
+        "plan": plan,
+        "mode": "real_llm",
+        "raw_response": response.output_text,
+    }
+
+
+def get_analysis_plan(question: str, mock_mode: bool = True, model: str = "gpt-4.1-mini") -> Dict[str, Any]:
+    if mock_mode:
+        return fallback_rule_planner(question)
+
+    try:
+        return plan_analysis_with_llm(question=question, model=model)
+    except Exception as exc:
+        fallback = fallback_rule_planner(question)
+        fallback["reason"] = f"{fallback['reason']}（LLM planner fallback: {exc}）"
+        fallback["mode"] = "fallback_rule"
+        return fallback
+
+
+def fallback_rule_answer(structured_output: Dict[str, Any], reason: str = "") -> Dict[str, Any]:
+    framework = build_analysis_framework(structured_output)
+    summary = ""
+    if framework.get("health"):
+        health = framework["health"]
+        summary = (
+            f"品牌当前健康度状态为 {health['status']}，近7日订单变化 {health['order_change_rate']:.1%}，"
+            "建议优先处理影响转化与履约的关键短板。"
+        )
+    else:
+        summary = "当前问题聚焦专项诊断，建议优先按关键 gap 推进动作。"
+
+    problems = []
+    if framework.get("gaps"):
+        problems = [
+            f"{item['metric']} 在 {item['driver']} 维度表现为 {item['label']}"
+            for item in framework["gaps"][:3]
+        ]
+    else:
+        problems = ["当前暂无可用 gap 结果。"]
+
+    actions = []
+    if framework.get("allowed_actions"):
+        actions = [item["action"] for item in framework["allowed_actions"][:3]]
+    else:
+        actions = ["当前 intent 未要求输出动作建议。"]
+
+    note = "本轮建议基于结构化分析结果，不包含框架外推断。"
+    if reason:
+        note = f"{note} 系统提示：{reason}"
+
+    text = (
+        f"Executive Summary: {summary}\n\n"
+        f"Key Problems: {'；'.join(problems)}\n\n"
+        f"Recommended Actions: {'；'.join(actions)}\n\n"
+        f"Note: {note}"
+    )
+    return {
+        "summary": summary,
+        "problems": problems,
+        "actions": actions,
+        "mode": "fallback_rule",
+        "text": text,
+        "estimated_input_tokens": None,
+        "actual_input_tokens": None,
+        "actual_output_tokens": None,
+        "actual_total_tokens": None,
+    }
+
+
+def build_answer_prompt(structured_output: Dict[str, Any]) -> str:
+    framework = build_analysis_framework(structured_output)
+    return f"""
+你是商家经营分析助手，面向客户经理输出结论。
+你必须严格基于给定结构化结果，不允许编造。
+
+请输出 JSON，字段固定为：
+{{
+  "summary": "Executive Summary，中文，1-2句",
+  "problems": ["Key Problems 列表，2-4条"],
+  "actions": ["Recommended Actions 列表，2-4条"]
+}}
+
+强约束：
+- 不要编造任何新数据或新指标。
+- actions 必须优先复用 allowed_actions 的原始动作文案，不要凭空发明动作。
+- 若无 allowed_actions，actions 请明确写“当前 intent 未要求输出动作建议”。
+- 文风专业、克制、可执行，语言中文。
+- 只输出 JSON，不要附加其他解释。
+
+结构化结果：
+{json.dumps(framework, ensure_ascii=False, indent=2)}
+""".strip()
+
+
+def parse_answer_payload(raw_text: str) -> Dict[str, Any]:
+    payload = json.loads(extract_json_object(raw_text))
+    for key in ["summary", "problems", "actions"]:
+        if key not in payload:
+            raise ValueError(f"missing field: {key}")
+
+    if not isinstance(payload["summary"], str):
+        raise ValueError("summary must be str")
+    for key in ["problems", "actions"]:
+        value = payload[key]
+        if not isinstance(value, list) or any(not isinstance(x, str) for x in value):
+            raise ValueError(f"{key} must be list[str]")
+    return payload
+
+
+def generate_answer_with_llm(
+    structured_output: Dict[str, Any],
+    model: str = "gpt-4.1",
+    mock_mode: bool = True,
+) -> Dict[str, Any]:
+    if mock_mode:
+        return fallback_rule_answer(structured_output, reason="mock_mode=True")
+
+    prompt = build_answer_prompt(structured_output)
+    estimated_tokens = estimate_text_tokens(prompt, model=model)
+
+    try:
+        client = create_openai_client()
+        response = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": "你是商家增长助手，只能返回合法 JSON。"},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        parsed = parse_answer_payload(response.output_text)
+        usage = getattr(response, "usage", None)
+        text = (
+            f"Executive Summary: {parsed['summary']}\n\n"
+            f"Key Problems: {'；'.join(parsed['problems'])}\n\n"
+            f"Recommended Actions: {'；'.join(parsed['actions'])}"
+        )
+        return {
+            "summary": parsed["summary"],
+            "problems": parsed["problems"],
+            "actions": parsed["actions"],
+            "mode": "real_llm",
+            "text": text,
+            "estimated_input_tokens": estimated_tokens,
+            "actual_input_tokens": getattr(usage, "input_tokens", None) if usage else None,
+            "actual_output_tokens": getattr(usage, "output_tokens", None) if usage else None,
+            "actual_total_tokens": getattr(usage, "total_tokens", None) if usage else None,
+        }
+    except Exception as exc:
+        fallback = fallback_rule_answer(structured_output, reason=f"LLM answer fallback: {exc}")
+        fallback["estimated_input_tokens"] = estimated_tokens
+        return fallback
 
 
 def normalize_plan_from_intent(intent: str) -> AnalysisPlan:
@@ -693,7 +989,6 @@ def build_controlled_analysis_prompt(output: Dict[str, Any]) -> str:
 2. Executive Summary
 3. Key Problems
 4. Recommended Actions
-5. Suggested Talking Points
 
 硬性要求：
 - 只能引用 framework 里出现的数据与字段
@@ -740,12 +1035,7 @@ def mock_controlled_analysis(output: Dict[str, Any]) -> str:
     else:
         lines.append("4. Recommended Actions\n- 当前 intent 未要求输出 action 建议。")
 
-    lines.append(
-        "5. Suggested Talking Points\n"
-        "- 先同步诊断结论，再按优先级推进已有 action。\n"
-        "- 本轮结论严格基于现有 framework，没有扩展新的建议。\n\n"
-        "（这是 mock 输出，未调用真实 LLM）"
-    )
+    lines.append("（这是 mock 输出，未调用真实 LLM）")
     return "\n\n".join(lines)
 
 
@@ -800,27 +1090,37 @@ def run_llm_orchestrated_pipeline(
 ) -> Dict[str, Any]:
     load_local_env()
     brand_row = get_brand_row(merchant_df, brand_id)
-    intent_result = identify_intent(question=question, model=intent_model, mock_mode=mock_mode)
+    plan_result = get_analysis_plan(question=question, mock_mode=mock_mode, model=intent_model)
 
-    if intent_result["intent"] == "irrelevant":
+    if plan_result["intent"] == "irrelevant":
         return {
             "brand_id": brand_id,
             "brand_name": str(brand_row["brand_name"]),
             "question": question,
             "intent_result": {
-                "intent": intent_result["intent"],
-                "reason": intent_result["reason"],
-                "mode": intent_result["mode"],
+                "intent": plan_result["intent"],
+                "reason": plan_result["reason"],
+                "mode": plan_result["mode"],
+            },
+            "plan_result": {
+                "intent": plan_result["intent"],
+                "modules": plan_result["modules"],
+                "focus_metrics": plan_result["focus_metrics"],
+                "reason": plan_result["reason"],
+                "mode": plan_result["mode"],
             },
             "intercepted": True,
             "structured_output": None,
             "analysis_result": {
+                "summary": IRRELEVANT_RESPONSE_TEXT,
+                "problems": [],
+                "actions": [],
                 "text": IRRELEVANT_RESPONSE_TEXT,
                 "estimated_input_tokens": None,
                 "actual_input_tokens": None,
                 "actual_output_tokens": None,
                 "actual_total_tokens": None,
-                "mode": "intercepted",
+                "mode": "fallback_rule",
             },
         }
 
@@ -830,10 +1130,10 @@ def run_llm_orchestrated_pipeline(
         peer_benchmark=peer_benchmark,
         health_config=health_config,
         gap_config=gap_config,
-        plan_override=intent_result["plan"],
+        plan_override=plan_result["plan"],
     )
-    analysis_result = generate_controlled_analysis(
-        output=structured_output,
+    analysis_result = generate_answer_with_llm(
+        structured_output=structured_output,
         model=analysis_model,
         mock_mode=mock_mode,
     )
@@ -842,9 +1142,16 @@ def run_llm_orchestrated_pipeline(
         "brand_name": str(brand_row["brand_name"]),
         "question": question,
         "intent_result": {
-            "intent": intent_result["intent"],
-            "reason": intent_result["reason"],
-            "mode": intent_result["mode"],
+            "intent": plan_result["intent"],
+            "reason": plan_result["reason"],
+            "mode": plan_result["mode"],
+        },
+        "plan_result": {
+            "intent": plan_result["intent"],
+            "modules": plan_result["modules"],
+            "focus_metrics": plan_result["focus_metrics"],
+            "reason": plan_result["reason"],
+            "mode": plan_result["mode"],
         },
         "structured_output": structured_output,
         "analysis_result": analysis_result,

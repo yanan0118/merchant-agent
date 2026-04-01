@@ -449,10 +449,6 @@
         <h3>Recommended Actions</h3>
         <ul id="actionsList" class="bullets"></ul>
       </div>
-      <div class="section">
-        <h3>Suggested Talking Points</h3>
-        <ul id="talkingList" class="bullets"></ul>
-      </div>
     </section>
 
     <section id="interceptCard" class="intercept-card hidden">
@@ -469,17 +465,6 @@
   </main>
 
   <script>
-    const BUSINESS_KEYWORDS = [
-      "商家", "门店", "店铺", "经营", "业务", "订单", "流量", "曝光", "转化", "销量",
-      "gmv", "营业", "客单价", "履约", "出餐", "取消率", "sku", "商品", "菜单",
-      "折扣", "活动", "诊断", "原因", "下降", "提升", "建议", "merchant", "orders", "conversion"
-    ];
-
-    const IRRELEVANT_KEYWORDS = [
-      "天气", "新闻", "股票", "电影", "动漫", "游戏", "旅游", "翻译", "笑话", "星座",
-      "菜谱", "健身", "减肥", "情感", "nba", "足球", "机票", "酒店", "music", "movie"
-    ];
-
     const input = document.getElementById("questionInput");
     const brandInput = document.getElementById("brandIdInput");
     const runBtn = document.getElementById("runBtn");
@@ -492,100 +477,11 @@
     const summaryText = document.getElementById("summaryText");
     const problemsList = document.getElementById("problemsList");
     const actionsList = document.getElementById("actionsList");
-    const talkingList = document.getElementById("talkingList");
     const interceptTitle = document.querySelector(".intercept-title");
     const interceptText = document.querySelector(".intercept-text");
 
-    const BRAND_NAMES = {
-      B001: "Blue Bottle",
-      B002: "Sunrise Burger"
-    };
     const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:8765" : "";
     let currentMode = "mock";
-
-    function containsAny(text, words) {
-      return words.some((w) => text.includes(w));
-    }
-
-    function detectIntent(question) {
-      const q = question.trim();
-      const lower = q.toLowerCase();
-      const hasBusiness = containsAny(q, BUSINESS_KEYWORDS) || containsAny(lower, BUSINESS_KEYWORDS);
-      const hasIrrelevant = containsAny(q, IRRELEVANT_KEYWORDS) || containsAny(lower, IRRELEVANT_KEYWORDS);
-
-      if (hasIrrelevant && !hasBusiness) {
-        return { intent: "irrelevant", modules: [], reason: "Detected non-business topic." };
-      }
-      if (q.includes("为什么") || q.includes("原因") || q.includes("下降")) {
-        return { intent: "root_cause", modules: ["health", "gap"], reason: "Focuses on diagnosing decline causes." };
-      }
-      if (q.includes("建议") || q.includes("怎么做") || q.includes("提升")) {
-        return { intent: "action_recommendation", modules: ["gap", "action"], reason: "Asks for growth actions." };
-      }
-      if (!hasBusiness) {
-        return { intent: "irrelevant", modules: [], reason: "No clear merchant-growth context." };
-      }
-      return { intent: "diagnosis", modules: ["health", "gap", "action"], reason: "General business diagnosis request." };
-    }
-
-    function makeAnswer(intent, brandId, brandName) {
-      if (intent === "root_cause") {
-        return {
-          summary: `品牌 ${brandName}（${brandId}）当前处于风险状态，近7日订单表现弱于历史与同类，问题更可能是多因素叠加而非单点异常。`,
-          problems: [
-            "转化率偏低，流量进入后成交效率不足。",
-            "图片覆盖率和营业时长偏弱，可能影响用户决策与高峰承接。",
-            "出餐时长和商责取消率存在压力，履约体验可能拖累复购。"
-          ],
-          actions: [
-            "先聚焦高影响动作：优化商品图片或设置更有吸引力的折扣。",
-            "补齐热销商品图片并校准菜单供给，提升转化入口质量。",
-            "梳理履约流程，优先压缩出餐时长并降低商责取消率。"
-          ],
-          talking: [
-            "先同步问题不是单一流量波动，而是转化与履约共同影响。",
-            "建议按优先级做两周小步快跑验证，再放大有效动作。"
-          ]
-        };
-      }
-
-      if (intent === "action_recommendation") {
-        return {
-          summary: `品牌 ${brandName}（${brandId}）当前问题重心在可执行提升动作，建议优先从转化入口与履约稳定性切入，快速拉动订单。`,
-          problems: [
-            "转化率处于弱势区间，核心入口效率需要提升。",
-            "菜单展示质量与营业覆盖不足，影响高峰承接能力。"
-          ],
-          actions: [
-            "优化商品图片或设置更有吸引力的折扣。",
-            "补齐菜单图片，优先补热销商品图。",
-            "延长晚间营业时间，覆盖高峰时段。"
-          ],
-          talking: [
-            "本轮动作先求确定性，不做过多并行尝试。",
-            "每条动作绑定一个结果指标，方便复盘。"
-          ]
-        };
-      }
-
-      return {
-        summary: `品牌 ${brandName}（${brandId}）建议做一轮全链路诊断，当前表现显示风险信号，需同时关注健康度、关键缺口与动作优先级。`,
-        problems: [
-          "健康度处于风险区间，订单趋势存在下滑压力。",
-          "关键缺口集中在转化、供给展示与履约体验。",
-          "动作执行顺序需要按影响力和可落地性重新排列。"
-        ],
-        actions: [
-          "先处理转化入口：图片与折扣策略并行优化。",
-          "再处理履约稳定性：缩短出餐并降低取消率。",
-          "最后补齐供给结构：增加动销SKU和高频商品可得性。"
-        ],
-        talking: [
-          "先讲清现状，再对齐优先级，最后明确执行节奏。",
-          "所有建议都基于受控分析框架，避免自由发挥。"
-        ]
-      };
-    }
 
     function renderList(target, items) {
       target.innerHTML = "";
@@ -597,52 +493,10 @@
     }
 
     function runAnalysis() {
-      if (currentMode === "real") {
-        runRealAnalysis();
-        return;
-      }
-
-      const question = input.value.trim();
-      const brandId = brandInput.value.trim().toUpperCase();
-      if (!question) {
-        input.focus();
-        return;
-      }
-      if (!brandId) {
-        brandInput.focus();
-        return;
-      }
-
-      const brandName = BRAND_NAMES[brandId];
-      if (!brandName) {
-        resultCard.classList.add("hidden");
-        interceptCard.classList.remove("hidden");
-        interceptTitle.textContent = "未找到该品牌";
-        interceptText.textContent = `未识别到品牌 ${brandId}。请先输入有效的 brand id（如 B001、B002），再发起分析。`;
-        return;
-      }
-
-      const plan = detectIntent(question);
-      if (plan.intent === "irrelevant") {
-        resultCard.classList.add("hidden");
-        interceptCard.classList.remove("hidden");
-        interceptTitle.textContent = "这是无关问题";
-        interceptText.textContent = "请继续提问商家经营诊断、订单波动原因、增长建议、转化/履约/供给等相关问题。";
-        return;
-      }
-
-      const answer = makeAnswer(plan.intent, brandId, brandName);
-      resultSub.textContent = `Generated for ${brandName} (${brandId}) under controlled framework`;
-      summaryText.textContent = answer.summary;
-      renderList(problemsList, answer.problems);
-      renderList(actionsList, answer.actions);
-      renderList(talkingList, answer.talking);
-
-      interceptCard.classList.add("hidden");
-      resultCard.classList.remove("hidden");
+      runBackendAnalysis(currentMode === "mock");
     }
 
-    async function runRealAnalysis() {
+    async function runBackendAnalysis(mockMode) {
       const question = input.value.trim();
       const brandId = brandInput.value.trim().toUpperCase();
 
@@ -665,7 +519,7 @@
           body: JSON.stringify({
             brand_id: brandId,
             question,
-            mock_mode: false
+            mock_mode: mockMode
           })
         });
 
@@ -679,32 +533,23 @@
           resultCard.classList.add("hidden");
           interceptCard.classList.remove("hidden");
           interceptTitle.textContent = "这是无关问题";
-          interceptText.textContent = result.analysis_result.text;
+          interceptText.textContent = result.analysis_result.text || "这是无关问题，请提问经营相关问题。";
           return;
         }
 
+        const analysis = result.analysis_result || {};
         const brandName = result.brand_name || brandId;
-        const planIntent = result.intent_result && result.intent_result.intent ? result.intent_result.intent : "diagnosis";
-        const answer = makeAnswer(planIntent, brandId, brandName);
-        summaryText.textContent = answer.summary;
-        renderList(problemsList, answer.problems);
-        renderList(actionsList, answer.actions);
-
-        const talking = [
-          `本轮分析范围：${brandName}（${brandId}）。`,
-          `模型模式：${result.analysis_result.mode || "real"}。`,
-          result.analysis_result.text
-        ];
-        renderList(talkingList, talking);
-
-        resultSub.textContent = `Generated for ${brandName} (${brandId}) by real LLM pipeline`;
+        summaryText.textContent = analysis.summary || "暂无摘要。";
+        renderList(problemsList, analysis.problems || []);
+        renderList(actionsList, analysis.actions || []);
+        resultSub.textContent = `Generated for ${brandName} (${brandId}) | planner=${result.intent_result?.mode || "n/a"} | answer=${analysis.mode || "n/a"}`;
         interceptCard.classList.add("hidden");
         resultCard.classList.remove("hidden");
       } catch (error) {
         resultCard.classList.add("hidden");
         interceptCard.classList.remove("hidden");
-        interceptTitle.textContent = "Real LLM 调用失败";
-        interceptText.textContent = `请确认本地服务已启动（python copilot_server.py），并检查 API Key。错误信息：${error.message}`;
+        interceptTitle.textContent = "分析调用失败";
+        interceptText.textContent = `请确认本地服务已启动（python copilot_server.py），并检查 API Key / 网络 / Base URL。错误信息：${error.message}`;
       } finally {
         runBtn.disabled = false;
         runBtn.textContent = "开始分析";
@@ -717,8 +562,8 @@
       mockModeBtn.classList.toggle("active", isMock);
       realModeBtn.classList.toggle("active", !isMock);
       modeTip.textContent = isMock
-        ? "当前为 Mock Demo：前端本地演示，不调用后端 LLM。"
-        : "当前为 Real LLM：调用本地 /api/analyze 接口，走真实模型。";
+        ? "当前为 Mock Demo：调用后端 mock_mode，便于稳定演示。"
+        : "当前为 Real LLM：调用后端真实模型（带规则 fallback）。";
     }
 
     runBtn.addEventListener("click", runAnalysis);
