@@ -412,7 +412,7 @@
               <button id="mockModeBtn" class="mode-btn active" type="button">Mock Demo</button>
               <button id="realModeBtn" class="mode-btn" type="button">Real LLM</button>
             </div>
-            <div id="modeTip" class="mode-tip">当前为 Mock Demo：前端本地演示，不调用后端 LLM。</div>
+            <div id="modeTip" class="mode-tip">当前为 Mock Demo：调用后端 mock_mode，稳定演示主流程。</div>
           </div>
         </div>
         <div class="row">
@@ -442,12 +442,16 @@
         <p id="summaryText"></p>
       </div>
       <div class="section">
-        <h3>Key Problems</h3>
+        <h3>Key Diagnoses</h3>
         <ul id="problemsList" class="bullets"></ul>
       </div>
       <div class="section">
         <h3>Recommended Actions</h3>
         <ul id="actionsList" class="bullets"></ul>
+      </div>
+      <div class="section">
+        <h3>Suggested Talking Points</h3>
+        <ul id="talkingList" class="bullets"></ul>
       </div>
     </section>
 
@@ -477,6 +481,7 @@
     const summaryText = document.getElementById("summaryText");
     const problemsList = document.getElementById("problemsList");
     const actionsList = document.getElementById("actionsList");
+    const talkingList = document.getElementById("talkingList");
     const interceptTitle = document.querySelector(".intercept-title");
     const interceptText = document.querySelector(".intercept-text");
 
@@ -492,8 +497,85 @@
       });
     }
 
+    function formatDiagnosesFromSchema(items) {
+      if (!Array.isArray(items) || items.length === 0) {
+        return ["暂无明确诊断结论。"];
+      }
+      return items.map((item) => {
+        const importance = (item.importance || "medium").toLowerCase();
+        const title = item.title || "未命名问题";
+        const description = item.description || "";
+        return description ? `[${importance}] ${title}：${description}` : `[${importance}] ${title}`;
+      });
+    }
+
+    function formatActionsFromSchema(items) {
+      if (!Array.isArray(items) || items.length === 0) {
+        return ["暂无动作建议。"];
+      }
+      return items.map((item) => {
+        const priority = (item.priority || "medium").toLowerCase();
+        const action = item.action || "未命名动作";
+        const why = item.why_it_matters || "";
+        return why ? `[${priority}] ${action}：${why}` : `[${priority}] ${action}`;
+      });
+    }
+
+    function makeAnswer(question) {
+      const q = question.trim();
+      if (!q) {
+        return {
+          summary: "请输入一个经营分析问题。",
+          diagnoses: [],
+          actions: [],
+          talking_points: []
+        };
+      }
+      return {
+        summary: "Mock 模式本地模板结果：该品牌存在增长改善空间，建议优先推进一到两个高影响动作并观察 7 天。",
+        diagnoses: [
+          "[high] 转化效率偏弱：进店到下单链路存在明显流失，需要先抓可见度与商品表达。",
+          "[medium] 履约稳定性待提升：高峰期响应波动会放大订单损失。"
+        ],
+        actions: [
+          "[high] 优先补齐热销商品图片并优化首屏卖点：直接改善用户决策效率。",
+          "[medium] 建立高峰时段接单与备货阈值：降低履约波动。"
+        ],
+        talking_points: [
+          "我们先聚焦 1-2 个高影响动作，7 天后用数据复盘再决定是否扩量。",
+          "目标是先把最明显的损失点补齐，再做下一轮增长动作。"
+        ]
+      };
+    }
+
     function runAnalysis() {
-      runBackendAnalysis(currentMode === "mock");
+      if (currentMode === "mock") {
+        runMockAnalysis();
+        return;
+      }
+      runBackendAnalysis(false);
+    }
+
+    function runMockAnalysis() {
+      const question = input.value.trim();
+      const brandId = brandInput.value.trim().toUpperCase();
+      if (!question) {
+        input.focus();
+        return;
+      }
+      if (!brandId) {
+        brandInput.focus();
+        return;
+      }
+      const brandName = brandId;
+      const analysis = makeAnswer(question);
+      summaryText.textContent = analysis.summary || "暂无摘要。";
+      renderList(problemsList, analysis.diagnoses || []);
+      renderList(actionsList, analysis.actions || []);
+      renderList(talkingList, analysis.talking_points || []);
+      resultSub.textContent = `Generated for ${brandName} (${brandId}) | planner=mock_local | answer=mock_template`;
+      interceptCard.classList.add("hidden");
+      resultCard.classList.remove("hidden");
     }
 
     async function runBackendAnalysis(mockMode) {
@@ -539,9 +621,10 @@
 
         const analysis = result.analysis_result || {};
         const brandName = result.brand_name || brandId;
-        summaryText.textContent = analysis.summary || "暂无摘要。";
-        renderList(problemsList, analysis.problems || []);
-        renderList(actionsList, analysis.actions || []);
+        summaryText.textContent = analysis?.overall_assessment?.summary || "暂无摘要。";
+        renderList(problemsList, formatDiagnosesFromSchema(analysis.key_diagnoses));
+        renderList(actionsList, formatActionsFromSchema(analysis.recommended_actions));
+        renderList(talkingList, analysis.talking_points || []);
         resultSub.textContent = `Generated for ${brandName} (${brandId}) | planner=${result.intent_result?.mode || "n/a"} | answer=${analysis.mode || "n/a"}`;
         interceptCard.classList.add("hidden");
         resultCard.classList.remove("hidden");
@@ -563,7 +646,7 @@
       realModeBtn.classList.toggle("active", !isMock);
       modeTip.textContent = isMock
         ? "当前为 Mock Demo：调用后端 mock_mode，便于稳定演示。"
-        : "当前为 Real LLM：调用后端真实模型（带规则 fallback）。";
+        : "当前为 Real LLM：LLM 主导分析，规则提供 evidence 与 fallback。";
     }
 
     runBtn.addEventListener("click", runAnalysis);

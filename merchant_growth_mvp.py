@@ -3,7 +3,7 @@ import os
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -170,6 +170,37 @@ IRRELEVANT_KEYWORDS = {
 IRRELEVANT_RESPONSE_TEXT = (
     "这是无关问题。请继续提问商家经营诊断、订单波动原因、增长建议、转化/履约/供给等相关问题。"
 )
+
+ALLOWED_ANALYSIS_TYPES = {
+    "diagnosis",
+    "root_cause",
+    "action_planning",
+    "risk_review",
+    "opportunity_scan",
+    "other",
+}
+ALLOWED_OVERALL_STATUS = {"healthy", "warning", "risk", "mixed"}
+ALLOWED_IMPORTANCE = {"high", "medium", "low"}
+ALLOWED_FOCUS_AREAS = {
+    "traffic",
+    "conversion",
+    "ops_readiness",
+    "user_experience",
+    "supply_quality",
+    "other",
+}
+ALLOWED_EVIDENCE_METRICS = {
+    "orders",
+    "impressions",
+    "conversion_rate",
+    "image_coverage",
+    "open_hours",
+    "accept_time_mins",
+    "prep_time_mins",
+    "merchant_cancel_rate",
+    "active_spu_count",
+    "discount_rate",
+}
 
 
 def create_mock_inputs(seed: int = 42) -> Tuple[pd.DataFrame, Dict[str, np.ndarray]]:
@@ -464,67 +495,70 @@ def render_report(output: Dict[str, Any]) -> None:
 
 
 def fallback_rule_planner(question: str) -> Dict[str, Any]:
-    """Rule-based planner used as the stable fallback path."""
+    """Rule fallback planner with open content but stable interface."""
     lower_q = question.lower()
-
-    if any(keyword in question for keyword in IRRELEVANT_KEYWORDS) and not any(
+    is_irrelevant = any(keyword in question for keyword in IRRELEVANT_KEYWORDS) and not any(
         keyword in question or keyword in lower_q for keyword in BUSINESS_RELATED_KEYWORDS
-    ):
-        plan = PLAN_LIBRARY["irrelevant"]
-        return {
-            "intent": plan.intent,
-            "modules": plan.analysis_modules,
-            "focus_metrics": plan.focus_metrics,
-            "reason": "规则识别为无关问题",
-            "plan": plan,
-            "mode": "fallback_rule",
-        }
+    )
 
-    if ("为什么" in question) or ("原因" in question) or ("下降" in question):
-        plan = PLAN_LIBRARY["root_cause"]
-        return {
-            "intent": plan.intent,
-            "modules": plan.analysis_modules,
-            "focus_metrics": plan.focus_metrics,
-            "reason": "规则识别为原因分析问题",
-            "plan": plan,
-            "mode": "fallback_rule",
-        }
-    if ("建议" in question) or ("怎么做" in question) or ("提升" in question):
-        plan = PLAN_LIBRARY["action_recommendation"]
-        return {
-            "intent": plan.intent,
-            "modules": plan.analysis_modules,
-            "focus_metrics": plan.focus_metrics,
-            "reason": "规则识别为动作建议问题",
-            "plan": plan,
-            "mode": "fallback_rule",
-        }
-    if not any(keyword in question or keyword in lower_q for keyword in BUSINESS_RELATED_KEYWORDS):
-        plan = PLAN_LIBRARY["irrelevant"]
-        return {
-            "intent": plan.intent,
-            "modules": plan.analysis_modules,
-            "focus_metrics": plan.focus_metrics,
-            "reason": "规则识别为无关问题",
-            "plan": plan,
-            "mode": "fallback_rule",
-        }
+    if is_irrelevant or not any(keyword in question or keyword in lower_q for keyword in BUSINESS_RELATED_KEYWORDS):
+        analysis_type = "other"
+        analysis_goal = "当前问题与商家经营分析相关性较低，建议先明确经营目标或具体指标问题。"
+        focus_areas = ["other"]
+        suggested_evidence_priority = []
+        reason = "规则识别为非经营相关问题"
+    elif ("为什么" in question) or ("原因" in question) or ("下降" in question):
+        analysis_type = "root_cause"
+        analysis_goal = "定位订单/增长波动的关键驱动因素并解释因果链路。"
+        focus_areas = ["traffic", "conversion", "ops_readiness"]
+        suggested_evidence_priority = ["orders", "impressions", "conversion_rate", "merchant_cancel_rate", "prep_time_mins"]
+        reason = "规则识别为原因分析问题"
+    elif ("建议" in question) or ("怎么做" in question) or ("提升" in question):
+        analysis_type = "action_planning"
+        analysis_goal = "识别增长短板并给出可执行、可验证的优先级动作建议。"
+        focus_areas = ["conversion", "ops_readiness", "supply_quality"]
+        suggested_evidence_priority = ["conversion_rate", "image_coverage", "merchant_cancel_rate", "active_spu_count", "discount_rate"]
+        reason = "规则识别为动作规划问题"
+    elif ("风险" in question) or ("隐患" in question):
+        analysis_type = "risk_review"
+        analysis_goal = "识别影响短期稳定经营的高风险因素并给出缓释建议。"
+        focus_areas = ["ops_readiness", "user_experience"]
+        suggested_evidence_priority = ["merchant_cancel_rate", "prep_time_mins", "accept_time_mins", "open_hours"]
+        reason = "规则识别为风险评估问题"
+    elif ("机会" in question) or ("增长点" in question):
+        analysis_type = "opportunity_scan"
+        analysis_goal = "识别可放大的增长机会并给出试点动作。"
+        focus_areas = ["traffic", "conversion", "supply_quality"]
+        suggested_evidence_priority = ["impressions", "conversion_rate", "active_spu_count", "discount_rate"]
+        reason = "规则识别为机会扫描问题"
+    else:
+        analysis_type = "diagnosis"
+        analysis_goal = "做整体经营诊断并确定最影响增长的关键问题。"
+        focus_areas = ["traffic", "conversion", "ops_readiness"]
+        suggested_evidence_priority = ["orders", "impressions", "conversion_rate", "merchant_cancel_rate", "prep_time_mins"]
+        reason = "规则识别为整体经营诊断问题"
 
-    plan = PLAN_LIBRARY["diagnosis"]
     return {
-        "intent": plan.intent,
-        "modules": plan.analysis_modules,
-        "focus_metrics": plan.focus_metrics,
-        "reason": "规则识别为整体经营诊断问题",
-        "plan": plan,
+        "analysis_type": analysis_type,
+        "analysis_goal": analysis_goal,
+        "focus_areas": focus_areas[:3],
+        "suggested_evidence_priority": suggested_evidence_priority[:5],
+        "reason": reason,
         "mode": "fallback_rule",
     }
 
 
 def plan_analysis(question: str) -> AnalysisPlan:
     """Backward-compatible wrapper for previous callers."""
-    return fallback_rule_planner(question)["plan"]
+    plan_result = fallback_rule_planner(question)
+    analysis_type = plan_result["analysis_type"]
+    if analysis_type == "other":
+        return PLAN_LIBRARY["irrelevant"]
+    if analysis_type == "root_cause":
+        return PLAN_LIBRARY["root_cause"]
+    if analysis_type == "action_planning":
+        return PLAN_LIBRARY["action_recommendation"]
+    return PLAN_LIBRARY["diagnosis"]
 
 
 def run_pipeline(
@@ -543,6 +577,21 @@ def run_pipeline(
         "merchant_name": merchant_row["merchant_name"],
         "brand_id": merchant_row.get("brand_id", ""),
         "brand_name": merchant_row.get("brand_name", ""),
+        "category": merchant_row.get("category", ""),
+        "district": merchant_row.get("district", ""),
+        "metric_snapshot": {
+            "orders_7d": float(merchant_row.get("orders_7d", 0.0)),
+            "orders_prev_7d": float(merchant_row.get("orders_prev_7d", 0.0)),
+            "impressions": float(merchant_row.get("impressions", 0.0)),
+            "conversion_rate": float(merchant_row.get("conversion_rate", 0.0)),
+            "image_coverage": float(merchant_row.get("image_coverage", 0.0)),
+            "open_hours": float(merchant_row.get("open_hours", 0.0)),
+            "accept_time_mins": float(merchant_row.get("accept_time_mins", 0.0)),
+            "prep_time_mins": float(merchant_row.get("prep_time_mins", 0.0)),
+            "merchant_cancel_rate": float(merchant_row.get("merchant_cancel_rate", 0.0)),
+            "active_spu_count": float(merchant_row.get("active_spu_count", 0.0)),
+            "discount_rate": float(merchant_row.get("discount_rate", 0.0)),
+        },
     }
 
     gap_results: Optional[List[GapResult]] = None
@@ -617,69 +666,66 @@ def create_openai_client() -> Any:
 
 
 def validate_plan_schema(payload: Dict[str, Any]) -> Dict[str, Any]:
-    allowed_intents = {"diagnosis", "root_cause", "action_recommendation", "irrelevant"}
-    allowed_modules = {"health", "gap", "action"}
+    analysis_type = payload.get("analysis_type")
+    if analysis_type not in ALLOWED_ANALYSIS_TYPES:
+        raise ValueError(f"invalid analysis_type: {analysis_type}")
 
-    intent = payload.get("intent")
-    if intent not in allowed_intents:
-        raise ValueError(f"invalid intent: {intent}")
+    analysis_goal = payload.get("analysis_goal")
+    if not isinstance(analysis_goal, str) or not analysis_goal.strip():
+        raise ValueError("analysis_goal must be non-empty str")
 
-    modules = payload.get("modules")
-    if not isinstance(modules, list):
-        raise ValueError("modules must be a list")
-    if any((not isinstance(m, str)) or (m not in allowed_modules) for m in modules):
-        raise ValueError(f"invalid modules: {modules}")
+    focus_areas = payload.get("focus_areas")
+    if not isinstance(focus_areas, list):
+        raise ValueError("focus_areas must be a list")
+    if len(focus_areas) > 3:
+        raise ValueError("focus_areas must contain at most 3 items")
+    for area in focus_areas:
+        if area not in ALLOWED_FOCUS_AREAS:
+            raise ValueError(f"invalid focus area: {area}")
 
-    if intent == "irrelevant" and modules:
-        raise ValueError("irrelevant intent must have empty modules")
-    if intent != "irrelevant" and not modules:
-        raise ValueError("non-irrelevant intent must have modules")
+    suggested_evidence_priority = payload.get("suggested_evidence_priority")
+    if not isinstance(suggested_evidence_priority, list):
+        raise ValueError("suggested_evidence_priority must be a list")
+    if len(suggested_evidence_priority) > 5:
+        raise ValueError("suggested_evidence_priority must contain at most 5 items")
+    for metric in suggested_evidence_priority:
+        if metric not in ALLOWED_EVIDENCE_METRICS:
+            raise ValueError(f"invalid evidence metric: {metric}")
 
-    focus_metrics = payload.get("focus_metrics")
-    if not isinstance(focus_metrics, list):
-        raise ValueError("focus_metrics must be a list")
-    if any(not isinstance(x, str) for x in focus_metrics):
-        raise ValueError("focus_metrics must be list[str]")
-
-    reason = payload.get("reason", "")
+    reason = payload.get("reason")
     if not isinstance(reason, str):
         raise ValueError("reason must be str")
 
     return {
-        "intent": intent,
-        "modules": modules,
-        "focus_metrics": focus_metrics,
+        "analysis_type": analysis_type,
+        "analysis_goal": analysis_goal.strip(),
+        "focus_areas": focus_areas,
+        "suggested_evidence_priority": suggested_evidence_priority,
         "reason": reason.strip(),
     }
 
 
 def build_planner_prompt(question: str) -> str:
     return f"""
-你是商家增长助手的 analysis planner。
-请先判断用户问题是否与商家经营分析相关，然后输出分析计划。
+你是 Merchant Growth Copilot 的 analysis planner。
+你可以自主判断分析方向，但必须输出固定 schema 的 JSON。
 
-只允许以下 intent：
-- diagnosis
-- root_cause
-- action_recommendation
-- irrelevant
+要求：
+- analysis_type 只能从白名单中选择。
+- focus_areas 最多 3 个。
+- suggested_evidence_priority 最多 5 个，且必须来自允许指标集合。
+- 输出只能是 JSON，不要额外文本。
 
-只允许以下 modules（按需选择）：
-- health
-- gap
-- action
-
-输出必须是 JSON，且仅输出 JSON，不要额外解释。格式如下：
+输出格式：
 {{
-  "intent": "diagnosis|root_cause|action_recommendation|irrelevant",
-  "modules": ["health", "gap", "action"],
-  "focus_metrics": ["..."],
+  "analysis_type": "diagnosis|root_cause|action_planning|risk_review|opportunity_scan|other",
+  "analysis_goal": "...",
+  "focus_areas": ["traffic|conversion|ops_readiness|user_experience|supply_quality|other"],
+  "suggested_evidence_priority": [
+    "orders|impressions|conversion_rate|image_coverage|open_hours|accept_time_mins|prep_time_mins|merchant_cancel_rate|active_spu_count|discount_rate"
+  ],
   "reason": "简短中文理由"
 }}
-
-约束：
-- 如果 intent 是 irrelevant，modules 必须为空数组，focus_metrics 也应为空或很少。
-- 不要编造数据库字段，focus_metrics 尽量使用常见经营指标词汇。
 
 用户问题：{question}
 """.strip()
@@ -701,18 +747,12 @@ def plan_analysis_with_llm(question: str, model: str = "gpt-4.1-mini") -> Dict[s
         ],
     )
     parsed = parse_planner_payload(response.output_text)
-    plan = AnalysisPlan(
-        intent=parsed["intent"],
-        focus_metrics=parsed["focus_metrics"],
-        analysis_modules=parsed["modules"],
-        time_range="7d",
-    )
     return {
-        "intent": parsed["intent"],
-        "modules": parsed["modules"],
-        "focus_metrics": parsed["focus_metrics"],
+        "analysis_type": parsed["analysis_type"],
+        "analysis_goal": parsed["analysis_goal"],
+        "focus_areas": parsed["focus_areas"],
+        "suggested_evidence_priority": parsed["suggested_evidence_priority"],
         "reason": parsed["reason"],
-        "plan": plan,
         "mode": "real_llm",
         "raw_response": response.output_text,
     }
@@ -731,49 +771,251 @@ def get_analysis_plan(question: str, mock_mode: bool = True, model: str = "gpt-4
         return fallback
 
 
-def fallback_rule_answer(structured_output: Dict[str, Any], reason: str = "") -> Dict[str, Any]:
-    framework = build_analysis_framework(structured_output)
-    summary = ""
-    if framework.get("health"):
-        health = framework["health"]
-        summary = (
-            f"品牌当前健康度状态为 {health['status']}，近7日订单变化 {health['order_change_rate']:.1%}，"
-            "建议优先处理影响转化与履约的关键短板。"
-        )
-    else:
-        summary = "当前问题聚焦专项诊断，建议优先按关键 gap 推进动作。"
+def _planner_to_execution_plan(plan_result: Dict[str, Any]) -> AnalysisPlan:
+    """Convert open planner output into a minimal evidence-collection execution plan."""
+    analysis_type = plan_result.get("analysis_type", "diagnosis")
+    focus_metrics = plan_result.get("suggested_evidence_priority", [])
 
-    problems = []
-    if framework.get("gaps"):
-        problems = [
-            f"{item['metric']} 在 {item['driver']} 维度表现为 {item['label']}"
-            for item in framework["gaps"][:3]
-        ]
-    else:
-        problems = ["当前暂无可用 gap 结果。"]
+    if analysis_type == "other":
+        return PLAN_LIBRARY["irrelevant"]
+    if analysis_type == "root_cause":
+        return AnalysisPlan(
+            intent="root_cause",
+            focus_metrics=focus_metrics,
+            analysis_modules=["health", "gap"],
+            time_range="7d",
+        )
+    if analysis_type in {"action_planning", "risk_review", "opportunity_scan"}:
+        return AnalysisPlan(
+            intent="action_recommendation",
+            focus_metrics=focus_metrics,
+            analysis_modules=["health", "gap"],
+            time_range="7d",
+        )
+    return AnalysisPlan(
+        intent="diagnosis",
+        focus_metrics=focus_metrics,
+        analysis_modules=["health", "gap"],
+        time_range="7d",
+    )
+
+
+def _normalize_level(value: str, allowed: Set[str], default: str = "medium") -> str:
+    norm = str(value).strip().lower()
+    return norm if norm in allowed else default
+
+
+def _question_to_analysis_type(question: str) -> str:
+    q = question.lower()
+    if any(k in question for k in ["原因", "为什么", "下滑"]):
+        return "root_cause"
+    if any(k in question for k in ["建议", "动作", "提升", "优化"]):
+        return "action_planning"
+    if any(k in question for k in ["风险", "隐患"]):
+        return "risk_review"
+    if any(k in question for k in ["机会", "增长点"]):
+        return "opportunity_scan"
+    if any(k in q for k in ["root cause", "action", "risk", "opportunity"]):
+        if "root cause" in q:
+            return "root_cause"
+        if "risk" in q:
+            return "risk_review"
+        if "opportunity" in q:
+            return "opportunity_scan"
+        return "action_planning"
+    return "diagnosis"
+
+
+def build_analysis_evidence(question: str, structured_output: Dict[str, Any]) -> Dict[str, Any]:
+    """Build evidence package with raw data as primary source for AI analyst."""
+    gaps = structured_output.get("gaps", [])
+
+    peer_comparison = {
+        item["metric"]: {
+            "value": float(item.get("value", 0.0)),
+            "peer_percentile": float(item.get("percentile", 0.0)),
+        }
+        for item in gaps
+    }
+
+    health = structured_output.get("health", {}) or {}
+    metrics = structured_output.get("metric_snapshot", {}) or {}
+    performance_summary = {
+        "orders_7d": metrics.get("orders_7d"),
+        "orders_prev_7d": metrics.get("orders_prev_7d"),
+        "order_change_rate": health.get("order_change_rate"),
+        "health_status": health.get("status"),
+        "health_summary": health.get("summary"),
+    }
+
+    return {
+        "question": question,
+        "merchant_profile": {
+            "brand_id": structured_output.get("brand_id", ""),
+            "brand_name": structured_output.get("brand_name", ""),
+            "merchant_name": structured_output.get("merchant_name", ""),
+            "category": structured_output.get("category", ""),
+            "district": structured_output.get("district", ""),
+        },
+        "performance_summary": performance_summary,
+        "metrics": metrics,
+        "peer_comparison": peer_comparison,
+        "rule_hints": {
+            "note": "以下是系统常用分析视角，仅供参考",
+        },
+    }
+
+
+def _decorate_analysis_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    overall = result.get("overall_assessment", {}) or {}
+    summary = str(overall.get("summary", "")).strip() or "暂无总结。"
+
+    diagnoses = []
+    for d in result.get("key_diagnoses", []):
+        importance = _normalize_level(d.get("importance", "medium"), ALLOWED_IMPORTANCE)
+        title = str(d.get("title", "未命名问题")).strip()
+        desc = str(d.get("description", "")).strip()
+        if desc:
+            diagnoses.append(f"[{importance}] {title}：{desc}")
+        else:
+            diagnoses.append(f"[{importance}] {title}")
+    if not diagnoses:
+        diagnoses = ["暂无明确诊断结论。"]
 
     actions = []
-    if framework.get("allowed_actions"):
-        actions = [item["action"] for item in framework["allowed_actions"][:3]]
-    else:
-        actions = ["当前 intent 未要求输出动作建议。"]
+    for a in result.get("recommended_actions", []):
+        priority = _normalize_level(a.get("priority", "medium"), ALLOWED_IMPORTANCE)
+        action = str(a.get("action", "")).strip()
+        why = str(a.get("why_it_matters", "")).strip()
+        if action and why:
+            actions.append(f"[{priority}] {action}：{why}")
+        elif action:
+            actions.append(f"[{priority}] {action}")
+    if not actions:
+        actions = ["暂无动作建议。"]
 
-    note = "本轮建议基于结构化分析结果，不包含框架外推断。"
-    if reason:
-        note = f"{note} 系统提示：{reason}"
+    talking_points = [
+        x for x in result.get("talking_points", [])
+        if isinstance(x, str) and x.strip()
+    ]
+    if not talking_points:
+        talking_points = ["建议先与商家确认当前经营目标，再推进优先级最高的动作。"]
 
     text = (
         f"Executive Summary: {summary}\n\n"
-        f"Key Problems: {'；'.join(problems)}\n\n"
+        f"Key Diagnoses: {'；'.join(diagnoses)}\n\n"
         f"Recommended Actions: {'；'.join(actions)}\n\n"
-        f"Note: {note}"
+        f"Talking Points: {'；'.join(talking_points)}"
     )
     return {
+        **result,
         "summary": summary,
-        "problems": problems,
+        "diagnoses": diagnoses,
+        "problems": diagnoses,
         "actions": actions,
-        "mode": "fallback_rule",
+        "talking_points": talking_points,
         "text": text,
+    }
+
+
+def fallback_rule_answer(
+    question: str,
+    evidence: Dict[str, Any],
+    reason: str = "",
+) -> Dict[str, Any]:
+    """Rule fallback that aligns to the AI schema."""
+    health_status = str(
+        (evidence.get("performance_summary", {}) or {}).get("health_status", "warning")
+    ).strip().lower()
+    status = health_status if health_status in ALLOWED_OVERALL_STATUS else "warning"
+
+    peer_cmp = evidence.get("peer_comparison", {}) or {}
+    ranked_metrics = sorted(
+        peer_cmp.items(),
+        key=lambda kv: float((kv[1] or {}).get("peer_percentile", 1.0)),
+    )
+
+    key_diagnoses = []
+    for metric, info in ranked_metrics[:3]:
+        key_diagnoses.append(
+            {
+                "title": f"{metric} 表现偏弱",
+                "description": (
+                    f"{metric} 的同类分位为 {float(info.get('peer_percentile', 0.0)):.1%}，"
+                    f"当前值 {float(info.get('value', 0.0)):.4g}"
+                ),
+                "importance": "high" if float(info.get("peer_percentile", 1.0)) < 0.2 else "medium",
+                "evidence_refs": [metric],
+            }
+        )
+    if not key_diagnoses:
+        key_diagnoses = [
+            {
+                "title": "经营状态需持续跟踪",
+                "description": "当前可用证据有限，建议补充近 14 天关键指标后再做深度诊断。",
+                "importance": "medium",
+                "evidence_refs": [],
+            }
+        ]
+
+    recommended_actions = []
+    for metric, info in ranked_metrics[:3]:
+        percentile = float(info.get("peer_percentile", 0.5))
+        if metric == "image_coverage":
+            action_text = "优先补齐热销 SKU 图片，并建立新品上架即补图的检查清单。"
+        elif metric == "conversion_rate":
+            action_text = "重写前 5 个主力商品标题与卖点，并同步优化价格锚点和套餐展示。"
+        elif metric == "merchant_cancel_rate":
+            action_text = "按高频取消原因做备货白名单与接单阈值，先把商责取消压到目标线。"
+        elif metric == "prep_time_mins":
+            action_text = "拆分后厨流程并设出餐时钟，优先优化高销量 SKU 的出餐路径。"
+        else:
+            action_text = f"针对 {metric} 制定 7 天专项优化动作并每日复盘。"
+
+        recommended_actions.append(
+            {
+                "action": action_text,
+                "why_it_matters": (
+                    f"{metric} 当前同类分位仅 {percentile:.1%}，是当前增长的主要拖累项之一。"
+                ),
+                "priority": "high" if percentile < 0.2 else "medium",
+                "related_diagnoses": [key_diagnoses[0]["title"]],
+            }
+        )
+
+    if not recommended_actions:
+        recommended_actions.append(
+            {
+                "action": "先补齐近 14 天关键经营数据，再确定首个高影响优化动作。",
+                "why_it_matters": "证据不足时先保证数据质量，避免误判导致资源浪费。",
+                "priority": "medium",
+                "related_diagnoses": [key_diagnoses[0]["title"]],
+            }
+        )
+
+    talking_points = [
+        "先对齐本周增长目标，再按优先级推进 1 到 2 个高影响动作。",
+        "每个动作建议设置 7 天观察窗口，复盘指标变化后再扩量。",
+    ]
+    if reason:
+        talking_points.append(f"系统说明：{reason}")
+
+    fallback = {
+        "analysis_type": _question_to_analysis_type(question),
+        "overall_assessment": {
+            "status": status,
+            "summary": (
+                f"当前整体状态为 {status}，建议优先处理最弱指标并做小步快跑验证。"
+            ),
+        },
+        "key_diagnoses": key_diagnoses,
+        "recommended_actions": recommended_actions,
+        "talking_points": talking_points,
+        "confidence_note": "该结果来自规则回退，强证据来自指标分位，其他为经验性推断。",
+    }
+    return {
+        **_decorate_analysis_result(fallback),
+        "mode": "fallback_rule",
         "estimated_input_tokens": None,
         "actual_input_tokens": None,
         "actual_output_tokens": None,
@@ -781,55 +1023,174 @@ def fallback_rule_answer(structured_output: Dict[str, Any], reason: str = "") ->
     }
 
 
-def build_answer_prompt(structured_output: Dict[str, Any]) -> str:
-    framework = build_analysis_framework(structured_output)
+def build_ai_analyst_prompt(question: str, evidence: Dict[str, Any]) -> str:
     return f"""
-你是商家经营分析助手，面向客户经理输出结论。
-你必须严格基于给定结构化结果，不允许编造。
+【SYSTEM】
+你是一名资深外卖平台商家增长分析专家（Senior Merchant Growth Analyst）。
+你的能力：
+- 从复杂数据中识别关键问题
+- 判断影响订单增长的核心因素
+- 给出具体可执行建议
+- 做出取舍（优先级判断）
+你不会逐项罗列，而是只关注最重要的问题。
 
-请输出 JSON，字段固定为：
+【TASK】
+输入：
+- 用户问题（question）
+- 商家经营数据（evidence）
+你的任务是完成一次完整分析：
+1. 判断整体经营状态
+2. 识别 2-3 个最关键问题
+3. 解释原因
+4. 提出最有效建议（最多 3 个）
+5. 给客户经理话术
+你是在做分析与决策，不是解释数据。
+
+【CRITICAL RULES】
+1. 必须从所有指标中选择最影响增长的 2-3 个问题，不能逐项分析。
+2. 必须解释为什么这些问题影响订单增长（因果链路）。
+3. 必须引用 evidence 中的数据，不能编造事实。
+4. 可以推断，但要在 confidence_note 中明确不确定性。
+5. 禁止空话，动作必须具体可执行。
+6. rule_hints 仅供参考，你可以忽略。
+7. recommended_actions 最多 3 条。
+8. 输出必须为 JSON，且只输出 JSON。
+
+【FEW-SHOT 示例】
+输入（简化）：
+- conversion_rate 低于同行
+- image_coverage 低于同行
+
+错误分析：
+- 逐项罗列所有指标，平均给建议。
+
+正确分析：
+- 聚焦核心：转化率是关键问题，图片覆盖不足是直接原因之一。
+- 建议：优先补齐热销商品图片，并验证 7 天转化率变化。
+
+请模仿“抓重点 + 做取舍”的方式。
+
+【OUTPUT FORMAT】
 {{
-  "summary": "Executive Summary，中文，1-2句",
-  "problems": ["Key Problems 列表，2-4条"],
-  "actions": ["Recommended Actions 列表，2-4条"]
+  "analysis_type": "diagnosis|root_cause|action_planning|risk_review|opportunity_scan|other",
+  "overall_assessment": {{
+    "status": "healthy|warning|risk|mixed",
+    "summary": "一句总体判断"
+  }},
+  "key_diagnoses": [
+    {{
+      "title": "问题标题",
+      "description": "解释问题",
+      "importance": "high|medium|low",
+      "evidence_refs": ["metric_name"]
+    }}
+  ],
+  "recommended_actions": [
+    {{
+      "action": "具体可执行动作",
+      "why_it_matters": "为什么重要",
+      "priority": "high|medium|low",
+      "related_diagnoses": ["问题标题"]
+    }}
+  ],
+  "talking_points": ["客户经理话术"],
+  "confidence_note": "强证据与推断说明"
 }}
 
-强约束：
-- 不要编造任何新数据或新指标。
-- actions 必须优先复用 allowed_actions 的原始动作文案，不要凭空发明动作。
-- 若无 allowed_actions，actions 请明确写“当前 intent 未要求输出动作建议”。
-- 文风专业、克制、可执行，语言中文。
-- 只输出 JSON，不要附加其他解释。
+用户问题：
+{question}
 
-结构化结果：
-{json.dumps(framework, ensure_ascii=False, indent=2)}
+evidence:
+{json.dumps(evidence, ensure_ascii=False, indent=2)}
 """.strip()
 
 
-def parse_answer_payload(raw_text: str) -> Dict[str, Any]:
-    payload = json.loads(extract_json_object(raw_text))
-    for key in ["summary", "problems", "actions"]:
-        if key not in payload:
-            raise ValueError(f"missing field: {key}")
+def validate_ai_output(result: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
+    """Soft validation: only enforce structural availability and basic usability."""
+    required_top_fields = {
+        "analysis_type",
+        "overall_assessment",
+        "key_diagnoses",
+        "recommended_actions",
+        "talking_points",
+        "confidence_note",
+    }
+    missing = [x for x in required_top_fields if x not in result]
+    if missing:
+        raise ValueError(f"missing fields: {missing}")
 
-    if not isinstance(payload["summary"], str):
-        raise ValueError("summary must be str")
-    for key in ["problems", "actions"]:
-        value = payload[key]
-        if not isinstance(value, list) or any(not isinstance(x, str) for x in value):
-            raise ValueError(f"{key} must be list[str]")
-    return payload
+    analysis_type = str(result.get("analysis_type", "")).strip()
+    if analysis_type not in ALLOWED_ANALYSIS_TYPES:
+        raise ValueError("invalid analysis_type")
+
+    overall = result.get("overall_assessment")
+    if not isinstance(overall, dict):
+        raise ValueError("overall_assessment must be object")
+    status = str(overall.get("status", "")).strip().lower()
+    if status not in ALLOWED_OVERALL_STATUS:
+        raise ValueError("invalid overall_assessment.status")
+    if not isinstance(overall.get("summary"), str) or not overall.get("summary", "").strip():
+        raise ValueError("overall_assessment.summary is required")
+
+    key_diagnoses = result.get("key_diagnoses")
+    if not isinstance(key_diagnoses, list):
+        raise ValueError("key_diagnoses must be list")
+    if len(key_diagnoses) > 5:
+        raise ValueError("key_diagnoses must contain at most 5 items")
+    allowed_refs = set((evidence.get("metrics") or {}).keys()) | set((evidence.get("peer_comparison") or {}).keys())
+    for item in key_diagnoses:
+        if not isinstance(item, dict):
+            raise ValueError("diagnosis item must be object")
+        if not isinstance(item.get("title"), str) or not item.get("title", "").strip():
+            raise ValueError("diagnosis.title is required")
+        if not isinstance(item.get("description"), str):
+            raise ValueError("diagnosis.description must be str")
+        item["importance"] = _normalize_level(item.get("importance", "medium"), ALLOWED_IMPORTANCE)
+        refs = item.get("evidence_refs", [])
+        if not isinstance(refs, list):
+            raise ValueError("diagnosis.evidence_refs must be list")
+        if any((not isinstance(ref, str)) or (ref not in allowed_refs) for ref in refs):
+            raise ValueError("diagnosis.evidence_refs must reference evidence metric names")
+
+    actions = result.get("recommended_actions")
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("recommended_actions must be non-empty list")
+    if len(actions) > 3:
+        raise ValueError("recommended_actions must contain at most 3 items")
+    for item in actions:
+        if not isinstance(item, dict):
+            raise ValueError("action item must be object")
+        if not isinstance(item.get("action"), str) or not item.get("action", "").strip():
+            raise ValueError("action.action is required")
+        if not isinstance(item.get("why_it_matters"), str) or not item.get("why_it_matters", "").strip():
+            raise ValueError("action.why_it_matters is required")
+        item["priority"] = _normalize_level(item.get("priority", "medium"), ALLOWED_IMPORTANCE)
+        related = item.get("related_diagnoses", [])
+        if not isinstance(related, list):
+            raise ValueError("action.related_diagnoses must be list")
+
+    talking_points = result.get("talking_points")
+    if not isinstance(talking_points, list) or not talking_points:
+        raise ValueError("talking_points must be non-empty list")
+    if any(not isinstance(x, str) or not x.strip() for x in talking_points):
+        raise ValueError("talking_points must be list[str]")
+
+    if not isinstance(result.get("confidence_note"), str) or not result.get("confidence_note", "").strip():
+        raise ValueError("confidence_note is required")
+
+    return result
 
 
-def generate_answer_with_llm(
-    structured_output: Dict[str, Any],
+def analyze_with_llm(
+    question: str,
+    evidence: Dict[str, Any],
     model: str = "gpt-4.1",
     mock_mode: bool = True,
 ) -> Dict[str, Any]:
     if mock_mode:
-        return fallback_rule_answer(structured_output, reason="mock_mode=True")
+        return fallback_rule_answer(question=question, evidence=evidence, reason="mock_mode=True")
 
-    prompt = build_answer_prompt(structured_output)
+    prompt = build_ai_analyst_prompt(question=question, evidence=evidence)
     estimated_tokens = estimate_text_tokens(prompt, model=model)
 
     try:
@@ -837,32 +1198,46 @@ def generate_answer_with_llm(
         response = client.responses.create(
             model=model,
             input=[
-                {"role": "system", "content": "你是商家增长助手，只能返回合法 JSON。"},
+                {
+                    "role": "system",
+                    "content": (
+                        "你是一名资深外卖平台商家增长分析专家。"
+                        "你只返回合法 JSON，不输出其他文字。"
+                    ),
+                },
                 {"role": "user", "content": prompt},
             ],
         )
-        parsed = parse_answer_payload(response.output_text)
+        payload = json.loads(extract_json_object(response.output_text))
+        validated = validate_ai_output(payload, evidence=evidence)
         usage = getattr(response, "usage", None)
-        text = (
-            f"Executive Summary: {parsed['summary']}\n\n"
-            f"Key Problems: {'；'.join(parsed['problems'])}\n\n"
-            f"Recommended Actions: {'；'.join(parsed['actions'])}"
-        )
         return {
-            "summary": parsed["summary"],
-            "problems": parsed["problems"],
-            "actions": parsed["actions"],
+            **_decorate_analysis_result(validated),
             "mode": "real_llm",
-            "text": text,
             "estimated_input_tokens": estimated_tokens,
             "actual_input_tokens": getattr(usage, "input_tokens", None) if usage else None,
             "actual_output_tokens": getattr(usage, "output_tokens", None) if usage else None,
             "actual_total_tokens": getattr(usage, "total_tokens", None) if usage else None,
         }
     except Exception as exc:
-        fallback = fallback_rule_answer(structured_output, reason=f"LLM answer fallback: {exc}")
+        fallback = fallback_rule_answer(
+            question=question,
+            evidence=evidence,
+            reason=f"LLM fallback: {exc}",
+        )
         fallback["estimated_input_tokens"] = estimated_tokens
         return fallback
+
+
+def generate_answer_with_llm(
+    question: str,
+    structured_output: Dict[str, Any],
+    model: str = "gpt-4.1",
+    mock_mode: bool = True,
+    evidence_override: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    evidence = evidence_override or build_analysis_evidence(question=question, structured_output=structured_output)
+    return analyze_with_llm(question=question, evidence=evidence, model=model, mock_mode=mock_mode)
 
 
 def normalize_plan_from_intent(intent: str) -> AnalysisPlan:
@@ -957,126 +1332,6 @@ def identify_intent(question: str, model: str = "gpt-4.1-mini", mock_mode: bool 
     }
 
 
-def build_analysis_framework(output: Dict[str, Any]) -> Dict[str, Any]:
-    allowed_actions = [
-        {
-            "metric": item["metric"],
-            "driver": item["driver"],
-            "action": item["action"],
-            "priority": item["priority"],
-            "score": round(item["score"], 4),
-        }
-        for item in output.get("actions", [])
-    ]
-    return {
-        "question": output["question"],
-        "intent": output["plan"]["intent"],
-        "focus_metrics": output["plan"]["focus_metrics"],
-        "analysis_modules": output["plan"]["analysis_modules"],
-        "health": output.get("health"),
-        "gaps": output.get("gaps", []),
-        "allowed_actions": allowed_actions,
-    }
-
-
-def build_controlled_analysis_prompt(output: Dict[str, Any]) -> str:
-    framework = build_analysis_framework(output)
-    return f"""
-你是商家经营分析助手，但你必须严格遵守给定分析框架，不要自由发挥。
-
-请基于以下 framework 输出中文分析，结构固定为：
-1. Intent
-2. Executive Summary
-3. Key Problems
-4. Recommended Actions
-
-硬性要求：
-- 只能引用 framework 里出现的数据与字段
-- 如果没有 health 模块，就不要写 health 结论
-- 如果没有 gaps，就明确说明缺少 gap 结果
-- Recommended Actions 只能从 allowed_actions 中选择，最多 3 条
-- action 文案必须复用 allowed_actions 里的 action 原文，不要改写，不要新增
-- 不要输出 SQL，不要假设额外数据
-- 用简洁中文
-
-analysis framework:
-{json.dumps(framework, ensure_ascii=False, indent=2)}
-""".strip()
-
-
-def mock_controlled_analysis(output: Dict[str, Any]) -> str:
-    framework = build_analysis_framework(output)
-    lines = [f"1. Intent\n- {framework['intent']}"]
-
-    if framework["health"]:
-        health = framework["health"]
-        lines.append(
-            "2. Executive Summary\n"
-            f"- 当前健康度状态为 {health['status']}，近7日订单变化 {health['order_change_rate']:.1%}。"
-        )
-    else:
-        lines.append("2. Executive Summary\n- 当前问题聚焦于专项诊断，不输出健康度总览。")
-
-    if framework["gaps"]:
-        gap_lines = [
-            f"- {item['metric']} 属于 {item['driver']}，当前标签为 {item['label']}"
-            for item in framework["gaps"][:3]
-        ]
-        lines.append("3. Key Problems\n" + "\n".join(gap_lines))
-    else:
-        lines.append("3. Key Problems\n- 当前没有 gap 结果可供分析。")
-
-    if framework["allowed_actions"]:
-        action_lines = [
-            f"- {item['action']}（metric={item['metric']}, priority={item['priority']}）"
-            for item in framework["allowed_actions"][:3]
-        ]
-        lines.append("4. Recommended Actions\n" + "\n".join(action_lines))
-    else:
-        lines.append("4. Recommended Actions\n- 当前 intent 未要求输出 action 建议。")
-
-    lines.append("（这是 mock 输出，未调用真实 LLM）")
-    return "\n\n".join(lines)
-
-
-def generate_controlled_analysis(
-    output: Dict[str, Any],
-    model: str = "gpt-4.1",
-    mock_mode: bool = True,
-) -> Dict[str, Any]:
-    prompt = build_controlled_analysis_prompt(output)
-    estimated_input_tokens = estimate_text_tokens(prompt, model=model)
-
-    if mock_mode:
-        return {
-            "text": mock_controlled_analysis(output),
-            "estimated_input_tokens": estimated_input_tokens,
-            "actual_input_tokens": None,
-            "actual_output_tokens": None,
-            "actual_total_tokens": None,
-            "mode": "mock",
-        }
-
-    client = create_openai_client()
-    response = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": "你是一个严格遵循分析框架的商家经营分析助手。"},
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    usage = getattr(response, "usage", None)
-    return {
-        "text": response.output_text,
-        "estimated_input_tokens": estimated_input_tokens,
-        "actual_input_tokens": getattr(usage, "input_tokens", None) if usage else None,
-        "actual_output_tokens": getattr(usage, "output_tokens", None) if usage else None,
-        "actual_total_tokens": getattr(usage, "total_tokens", None) if usage else None,
-        "mode": "real",
-    }
-
-
 def run_llm_orchestrated_pipeline(
     brand_id: str,
     question: str,
@@ -1091,28 +1346,40 @@ def run_llm_orchestrated_pipeline(
     load_local_env()
     brand_row = get_brand_row(merchant_df, brand_id)
     plan_result = get_analysis_plan(question=question, mock_mode=mock_mode, model=intent_model)
+    exec_plan = _planner_to_execution_plan(plan_result)
 
-    if plan_result["intent"] == "irrelevant":
+    if plan_result["analysis_type"] == "other":
         return {
             "brand_id": brand_id,
             "brand_name": str(brand_row["brand_name"]),
             "question": question,
             "intent_result": {
-                "intent": plan_result["intent"],
+                "analysis_type": plan_result["analysis_type"],
                 "reason": plan_result["reason"],
                 "mode": plan_result["mode"],
             },
             "plan_result": {
-                "intent": plan_result["intent"],
-                "modules": plan_result["modules"],
-                "focus_metrics": plan_result["focus_metrics"],
+                "analysis_type": plan_result["analysis_type"],
+                "analysis_goal": plan_result.get("analysis_goal", ""),
+                "focus_areas": plan_result.get("focus_areas", []),
+                "suggested_evidence_priority": plan_result.get("suggested_evidence_priority", []),
                 "reason": plan_result["reason"],
                 "mode": plan_result["mode"],
             },
             "intercepted": True,
             "structured_output": None,
             "analysis_result": {
+                "analysis_type": "other",
+                "overall_assessment": {
+                    "status": "warning",
+                    "summary": IRRELEVANT_RESPONSE_TEXT,
+                },
+                "key_diagnoses": [],
+                "recommended_actions": [],
+                "talking_points": ["请继续提问商家经营相关问题。"],
+                "confidence_note": "问题与经营分析无关，未进入 AI 诊断流程。",
                 "summary": IRRELEVANT_RESPONSE_TEXT,
+                "diagnoses": [],
                 "problems": [],
                 "actions": [],
                 "text": IRRELEVANT_RESPONSE_TEXT,
@@ -1124,35 +1391,50 @@ def run_llm_orchestrated_pipeline(
             },
         }
 
+    # LLM-led analysis path: compute evidence first, let AI analyst make decisions.
     structured_output = run_pipeline(
         merchant_row=brand_row,
         question=question,
         peer_benchmark=peer_benchmark,
         health_config=health_config,
         gap_config=gap_config,
-        plan_override=plan_result["plan"],
+        plan_override=exec_plan,
     )
+    evidence = build_analysis_evidence(question=question, structured_output=structured_output)
     analysis_result = generate_answer_with_llm(
+        question=question,
         structured_output=structured_output,
         model=analysis_model,
         mock_mode=mock_mode,
+        evidence_override=evidence,
     )
     return {
         "brand_id": brand_id,
         "brand_name": str(brand_row["brand_name"]),
         "question": question,
         "intent_result": {
-            "intent": plan_result["intent"],
+            "analysis_type": plan_result["analysis_type"],
             "reason": plan_result["reason"],
             "mode": plan_result["mode"],
         },
         "plan_result": {
-            "intent": plan_result["intent"],
-            "modules": plan_result["modules"],
-            "focus_metrics": plan_result["focus_metrics"],
+            "analysis_type": plan_result["analysis_type"],
+            "analysis_goal": plan_result.get("analysis_goal", ""),
+            "focus_areas": plan_result.get("focus_areas", []),
+            "suggested_evidence_priority": plan_result.get("suggested_evidence_priority", []),
             "reason": plan_result["reason"],
             "mode": plan_result["mode"],
         },
         "structured_output": structured_output,
+        "analysis_evidence": evidence,
+        "ai_analyst_output": {
+            "analysis_type": analysis_result.get("analysis_type"),
+            "overall_assessment": analysis_result.get("overall_assessment", {}),
+            "key_diagnoses": analysis_result.get("key_diagnoses", []),
+            "recommended_actions": analysis_result.get("recommended_actions", []),
+            "talking_points": analysis_result.get("talking_points", []),
+            "confidence_note": analysis_result.get("confidence_note", ""),
+            "mode": analysis_result.get("mode"),
+        },
         "analysis_result": analysis_result,
     }
